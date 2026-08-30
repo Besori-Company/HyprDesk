@@ -54,12 +54,47 @@ strip_block() {
     rm -f "$tmp"
 }
 
+# Which package manager installed hyprdesk / Qué gestor de paquetes instaló hyprdesk
+system_package() {
+    if   command -v rpm    &>/dev/null && rpm -q hyprdesk        &>/dev/null; then echo "dnf"
+    elif command -v dpkg   &>/dev/null && dpkg -s hyprdesk       &>/dev/null; then echo "apt"
+    elif command -v pacman &>/dev/null && pacman -Qq hyprdesk    &>/dev/null; then echo "pacman"
+    fi
+}
+
 removed=0
 
 # ── Binary and desktop entry / Binario y entrada de escritorio ───
 [ -f "$BIN/hyprdesk" ]          && rm -f "$BIN/hyprdesk"          && msg "✓ Removed $BIN/hyprdesk" "✓ Eliminado $BIN/hyprdesk" && removed=1
 [ -f "$DESK/hyprdesk.desktop" ] && rm -f "$DESK/hyprdesk.desktop" && msg "✓ Removed .desktop entry" "✓ Eliminado .desktop"      && removed=1
 update-desktop-database "$DESK" 2>/dev/null || true
+
+# ── System package / Paquete del sistema ──────────────────────
+PKG="$(system_package)"
+if [ -n "$PKG" ]; then
+    ask "HyprDesk is also installed as a system package. Remove it (needs sudo)? [y/N]" \
+        "HyprDesk también está instalado como paquete del sistema. ¿Eliminarlo (necesita sudo)? [s/N]" ans_pkg
+    if [[ "$ans_pkg" =~ ^[sSyY]$ ]]; then
+        # A wrong password gets a second chance / Una contraseña equivocada tiene una segunda oportunidad
+        for try in 1 2; do
+            case "$PKG" in
+                dnf)    sudo dnf remove -y hyprdesk || true ;;
+                apt)    sudo apt-get remove -y hyprdesk || true ;;
+                pacman) sudo pacman -R --noconfirm hyprdesk || true ;;
+            esac
+            [ -z "$(system_package)" ] && break
+            [ "$try" = 1 ] && msg "That did not work. Trying once more:" \
+                                  "No ha funcionado. Se intenta una vez más:"
+        done
+        if [ -n "$(system_package)" ]; then
+            msg "! The system package could not be removed, try it by hand." \
+                "! No se pudo eliminar el paquete del sistema, inténtalo a mano."
+        else
+            msg "✓ Removed the system package" "✓ Eliminado el paquete del sistema"
+            removed=1
+        fi
+    fi
+fi
 
 # ── Icons / Iconos ────────────────────────────────────────────
 icon_count=0
