@@ -134,7 +134,7 @@ fn strings(lang: &str) -> &'static HashMap<&'static str, &'static str> {
             m.insert("confirm_opacity_inactive", "¿Mantener opacidad inactiva?");
             m.insert("confirm_app_opacity", "¿Mantener opacidad de {}?");
             m.insert("toast_monitor_reverted", "Configuración revertida");
-            m.insert("update_available", "v{} disponible");
+            m.insert("update_available", "Actualizar a v{}");
             m.insert("confirm_pending", "¿Mantener todos los cambios?");
             m
         }),
@@ -240,7 +240,7 @@ fn strings(lang: &str) -> &'static HashMap<&'static str, &'static str> {
             m.insert("confirm_opacity_inactive", "Keep inactive opacity?");
             m.insert("confirm_app_opacity", "Keep opacity for {}?");
             m.insert("toast_monitor_reverted", "Configuration reverted");
-            m.insert("update_available", "v{} available");
+            m.insert("update_available", "Update to v{}");
             m.insert("confirm_pending", "Keep all changes?");
             m
         }),
