@@ -175,32 +175,46 @@ fn wayland_env() -> std::collections::HashMap<String, String> {
     env
 }
 
+// Builds the restore commands / Construye los comandos de restauración
+fn restore_commands(config: &Config, backlight: bool, tool: &str) -> String {
+    let b = config.brightness;
+    let name = tool.split('/').next_back().unwrap_or("");
+    let t = if config.night_mode { config.night_temp } else { 6500 };
+    let mut lines: Vec<String> = Vec::new();
+
+    // Brightness: the hardware backlight when there is one / Brillo: la retroiluminación por hardware cuando la hay
+    if backlight {
+        lines.push(format!("    brightnessctl set {b}% &>/dev/null || true"));
+    }
+
+    // Colour temperature, and brightness by gamma when there is no backlight / Temperatura de color, y brillo por gamma cuando no hay retroiluminación
+    if !tool.is_empty() {
+        let bv = b as f64 / 100.0;
+        lines.push(match (name, backlight) {
+            ("redshift" | "gammastep", true) => format!("    {tool} -P -O {t} &>/dev/null || true"),
+            ("redshift" | "gammastep", false) => {
+                format!("    {tool} -P -O {t} -b {bv:.2}:{bv:.2} &>/dev/null || true")
+            }
+            ("hyprsunset", true) => format!("    {tool} -t {t} &"),
+            ("hyprsunset", false) => {
+                format!("    {tool} -t {t} & sleep 1 && hyprctl hyprsunset gamma {b} || true")
+            }
+            ("wlsunset", _) => format!("    {tool} -T {t} &"),
+            _ => String::new(),
+        });
+    }
+
+    lines.retain(|l| !l.trim().is_empty());
+    lines.join("\n")
+}
+
 // Writes the startup script and hooks it into the Hyprland config / Escribe el script de arranque y lo engancha en la configuración de Hyprland
 pub fn setup_autostart(config: &Config) {
     use crate::config::{hypr_conf, startup_script};
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
 
-    let b = config.brightness;
-    let temp = config.night_temp;
-    let nm = config.night_mode;
-    let tool = gamma_tool().unwrap_or_default();
-    let name = tool.split('/').last().unwrap_or("").to_string();
-
-    let restore = if has_backlight() {
-        format!("    brightnessctl set {b}% &>/dev/null || true")
-    } else if !tool.is_empty() {
-        let t = if nm { temp } else { 6500 };
-        let bv = b as f64 / 100.0;
-        match name.as_str() {
-            "redshift" | "gammastep" => format!("    {tool} -P -O {t} -b {bv:.2}:{bv:.2} &>/dev/null || true"),
-            "hyprsunset" => format!("    {tool} -t {t} & sleep 1 && hyprctl hyprsunset gamma {b} || true"),
-            "wlsunset" => format!("    {tool} -T {t} &"),
-            _ => String::new(),
-        }
-    } else {
-        String::new()
-    };
+    let restore = restore_commands(config, has_backlight(), &gamma_tool().unwrap_or_default());
 
     let script = format!("#!/bin/bash\n# HyprDesk startup — generado automáticamente.\n{restore}\n");
     let path = startup_script();
@@ -238,6 +252,38 @@ mod tests {
     use std::fs;
 
     // Writes and rewrites the autostart in a throwaway HOME / Escribe y reescribe el autostart en un HOME desechable
+
+    // Every hardware combination writes what it must / Cada combinación de hardware escribe lo que debe
+    #[test]
+    fn restore_covers_brightness_and_temperature() {
+        let cfg = Config { brightness: 40, night_mode: true, night_temp: 3000, ..Config::default() };
+
+        // Laptop: backlight for brightness, the tool only for temperature / Portátil: retroiluminación para el brillo, la herramienta solo para la temperatura
+        let laptop = restore_commands(&cfg, true, "/usr/bin/hyprsunset");
+        assert!(laptop.contains("brightnessctl set 40%"), "falta el brillo: {laptop}");
+        assert!(laptop.contains("-t 3000"), "falta la temperatura: {laptop}");
+        assert!(!laptop.contains("hyprsunset gamma"), "no debe bajar el brillo dos veces: {laptop}");
+
+        // Desktop: no backlight, gamma does both / Sobremesa: sin retroiluminación, el gamma hace las dos
+        let desktop = restore_commands(&cfg, false, "/usr/bin/hyprsunset");
+        assert!(!desktop.contains("brightnessctl"), "no hay retroiluminación que usar: {desktop}");
+        assert!(desktop.contains("-t 3000") && desktop.contains("gamma 40"), "{desktop}");
+
+        // Same split for the other tools / El mismo reparto con las otras herramientas
+        let gammastep = restore_commands(&cfg, true, "/usr/bin/gammastep");
+        assert!(gammastep.contains("brightnessctl set 40%") && gammastep.contains("-O 3000"), "{gammastep}");
+        assert!(!gammastep.contains(" -b "), "el brillo ya lo pone brightnessctl: {gammastep}");
+        assert!(restore_commands(&cfg, true, "/usr/bin/wlsunset").contains("-T 3000"));
+
+        // Night mode off restores neutral light / Con el modo noche apagado se restaura luz neutra
+        let day = Config { night_mode: false, ..cfg.clone() };
+        assert!(restore_commands(&day, true, "/usr/bin/hyprsunset").contains("-t 6500"));
+
+        // No tool at all: brightness only, and nothing at all without backlight / Sin herramienta: solo brillo, y nada sin retroiluminación
+        assert!(restore_commands(&cfg, true, "").contains("brightnessctl"));
+        assert_eq!(restore_commands(&cfg, false, ""), "");
+    }
+
     #[test]
     fn autostart_is_written_once() {
         let tmp = std::env::temp_dir().join("hyprdesk-autostart-test");
