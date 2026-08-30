@@ -1,0 +1,60 @@
+# Maintainer: Besori <https://github.com/Besori-Company>
+pkgname=hyprdesk
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Desktop control panel for Hyprland — brightness, night mode, monitors, opacity and profile"
+arch=('x86_64' 'aarch64')
+url="https://github.com/Besori-Company/HyprDesk"
+license=('LicenseRef-MIT-Commons-Clause')
+depends=('hyprland' 'vulkan-icd-loader')
+optdepends=(
+    'brightnessctl: hardware backlight control'
+    'hyprsunset: night mode (Hyprland native)'
+    'wlsunset: night mode (alternative)'
+)
+makedepends=('rust' 'cargo' 'pkg-config' 'libxkbcommon')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
+# Regenerate after tagging the release / Regenerar tras etiquetar la release: makepkg -g
+sha256sums=('SKIP')
+
+prepare() {
+    cd "HyprDesk-$pkgver"
+    export RUSTUP_TOOLCHAIN=stable
+    cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+    cd "HyprDesk-$pkgver"
+    export RUSTUP_TOOLCHAIN=stable
+    cargo build --frozen --release --target-dir target
+}
+
+package() {
+    cd "HyprDesk-$pkgver"
+
+    install -Dm755 "target/release/hyprdesk" \
+        "$pkgdir/usr/bin/hyprdesk"
+
+    install -Dm644 "hyprdesk/assets/icons/hyprdesk.png" \
+        "$pkgdir/usr/share/icons/hicolor/256x256/apps/hyprdesk.png"
+
+    install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/hyprdesk.desktop" << EOF
+[Desktop Entry]
+Name=HyprDesk
+GenericName=Control Panel
+GenericName[es]=Panel de Control
+Comment=Brightness, night mode and monitors for Hyprland
+Comment[es]=Brillo, modo noche y monitores para Hyprland
+Exec=/usr/bin/hyprdesk
+Icon=hyprdesk
+Terminal=false
+Type=Application
+Categories=Settings;System;HardwareSettings;
+Keywords=brightness;night;profile;monitor;hyprland;opacity;
+Keywords[es]=brillo;noche;perfil;monitor;hyprland;opacidad;
+StartupNotify=true
+StartupWMClass=hyprdesk
+EOF
+
+    install -Dm644 LICENSE.md "$pkgdir/usr/share/licenses/$pkgname/LICENSE.md"
+}
