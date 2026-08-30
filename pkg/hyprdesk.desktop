@@ -1,0 +1,15 @@
+[Desktop Entry]
+Name=HyprDesk
+GenericName=Control Panel
+GenericName[es]=Panel de Control
+Comment=Brightness, night mode and monitors for Hyprland
+Comment[es]=Brillo, modo noche y monitores para Hyprland
+Exec=hyprdesk
+Icon=hyprdesk
+Terminal=false
+Type=Application
+Categories=Settings;HardwareSettings;
+Keywords=brightness;night;profile;monitor;hyprland;opacity;
+Keywords[es]=brillo;noche;perfil;monitor;hyprland;opacidad;
+StartupNotify=true
+StartupWMClass=hyprdesk

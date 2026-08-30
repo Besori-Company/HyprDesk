@@ -80,7 +80,8 @@ jobs:
             --deb-recommends "brightnessctl" \
             --deb-recommends "hyprsunset | wlsunset" \
             "dist/hyprdesk-linux-x86_64=/usr/bin/hyprdesk" \
-            "hyprdesk/assets/icons/hyprdesk.png=/usr/share/icons/hicolor/256x256/apps/hyprdesk.png"
+            "hyprdesk/assets/icons/hyprdesk.png=/usr/share/icons/hicolor/256x256/apps/hyprdesk.png" \
+            "pkg/hyprdesk.desktop=/usr/share/applications/hyprdesk.desktop"
           mv hyprdesk_*.deb dist/hyprdesk_amd64.deb
 
       - name: Build .rpm (x86_64 only) / Crear paquete .rpm
@@ -95,7 +96,8 @@ jobs:
             --maintainer "Besori <https://github.com/Besori-Company>" \
             --rpm-summary "Desktop control panel for Hyprland" \
             "dist/hyprdesk-linux-x86_64=/usr/bin/hyprdesk" \
-            "hyprdesk/assets/icons/hyprdesk.png=/usr/share/icons/hicolor/256x256/apps/hyprdesk.png"
+            "hyprdesk/assets/icons/hyprdesk.png=/usr/share/icons/hicolor/256x256/apps/hyprdesk.png" \
+            "pkg/hyprdesk.desktop=/usr/share/applications/hyprdesk.desktop"
           mv hyprdesk-*.rpm dist/hyprdesk_x86_64.rpm
 
       - name: Upload artifacts / Subir artefactos
