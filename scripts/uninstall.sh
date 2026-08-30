@@ -26,7 +26,9 @@ ask() {
             "No hay terminal disponible, no se ha eliminado nada."
         exit 1
     fi
-    read -r -u 3 -p "$prompt " "$3"
+    # bash hides read's own prompt when stdin is a pipe, so it is printed here / bash oculta el prompt de read si la entrada es una tubería, así que se imprime aquí
+    printf '%s ' "$prompt" > /dev/tty
+    read -r -u 3 "$3"
 }
 
 echo "══════════════════════════════════════"
