@@ -175,8 +175,7 @@ fn wayland_env() -> std::collections::HashMap<String, String> {
     env
 }
 
-// Not wired to the UI yet / Todavía no conectada a la interfaz
-#[allow(dead_code)]
+// Writes the startup script and hooks it into the Hyprland config / Escribe el script de arranque y lo engancha en la configuración de Hyprland
 pub fn setup_autostart(config: &Config) {
     use crate::config::{hypr_conf, startup_script};
     use std::fs;
@@ -230,5 +229,43 @@ pub fn setup_autostart(config: &Config) {
                 let _ = fs::write(&hypr, content + &line);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    // Writes and rewrites the autostart in a throwaway HOME / Escribe y reescribe el autostart en un HOME desechable
+    #[test]
+    fn autostart_is_written_once() {
+        let tmp = std::env::temp_dir().join("hyprdesk-autostart-test");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(tmp.join(".config/hypr")).unwrap();
+        let conf = tmp.join(".config/hypr/hyprland.conf");
+        let original = "monitor = , preferred, auto, 1\nexec-once = waybar\n";
+        fs::write(&conf, original).unwrap();
+        unsafe { std::env::set_var("HOME", &tmp) };
+
+        let cfg = Config { brightness: 42, ..Config::default() };
+        setup_autostart(&cfg);
+
+        let script = tmp.join(".config/hypr/hyprdesk-startup.sh");
+        assert!(script.exists(), "no se creó el script de arranque");
+        let text = fs::read_to_string(&conf).unwrap();
+        assert!(text.contains("hyprdesk-startup.sh"), "no se añadió el exec-once");
+
+        // Running it again must not duplicate the line / Ejecutarlo otra vez no debe duplicar la línea
+        setup_autostart(&cfg);
+        let text = fs::read_to_string(&conf).unwrap();
+        assert_eq!(text.matches("hyprdesk-startup.sh").count(), 1, "se duplicó el exec-once");
+
+        // Nothing else in the file may be touched / No se puede tocar nada más del fichero
+        for line in original.lines() {
+            assert!(text.contains(line), "se perdió una línea ajena: {line}");
+        }
+
+        let _ = fs::remove_dir_all(&tmp);
     }
 }

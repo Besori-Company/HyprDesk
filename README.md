@@ -20,7 +20,7 @@
 ## Features
 
 ### Brightness
-Control your screen brightness in real time. Automatically detects the best available method (`brightnessctl` or gamma fallback).
+Control your screen brightness in real time. Automatically detects the best available method (`brightnessctl` or gamma fallback), and can restore the last value on every boot via `exec-once`.
 
 ### Night mode
 Reduce eye strain at night by lowering the color temperature (1000–6500 K). Supports `hyprsunset`, `wlsunset`, `gammastep` and `redshift`, uses whatever is installed.

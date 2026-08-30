@@ -20,7 +20,7 @@
 ## Funcionalidades
 
 ### Brillo
-Controla el brillo de tu pantalla en tiempo real. Detecta automáticamente el mejor método disponible (`brightnessctl` o ajuste gamma).
+Controla el brillo de tu pantalla en tiempo real. Detecta automáticamente el mejor método disponible (`brightnessctl` o ajuste gamma), y puede restaurar el último valor en cada arranque mediante `exec-once`.
 
 ### Modo noche
 Reduce la fatiga visual bajando la temperatura de color (1000–6500 K). Compatible con `hyprsunset`, `wlsunset`, `gammastep` y `redshift`, usa lo que tengas instalado.

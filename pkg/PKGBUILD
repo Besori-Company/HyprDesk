@@ -1,6 +1,6 @@
 # Maintainer: Besori <https://github.com/Besori-Company>
 pkgname=hyprdesk
-pkgver=1.0.1
+pkgver=1.0.2
 pkgrel=1
 pkgdesc="Desktop control panel for Hyprland — brightness, night mode, monitors, opacity and profile"
 arch=('x86_64' 'aarch64')

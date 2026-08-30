@@ -1602,7 +1602,7 @@ dependencies = [
 
 [[package]]
 name = "hyprdesk"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "iced",
  "image 0.24.9",

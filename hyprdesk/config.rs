@@ -51,12 +51,10 @@ pub fn hypr_dir() -> PathBuf {
     home_dir().join(".config").join("hypr")
 }
 
-#[allow(dead_code)]
 pub fn startup_script() -> PathBuf {
     hypr_dir().join("hyprdesk-startup.sh")
 }
 
-#[allow(dead_code)]
 pub fn hypr_conf() -> PathBuf {
     hypr_dir().join("hyprland.conf")
 }

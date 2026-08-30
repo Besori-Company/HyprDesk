@@ -136,6 +136,14 @@ fn strings(lang: &str) -> &'static HashMap<&'static str, &'static str> {
             m.insert("toast_monitor_reverted", "Configuración revertida");
             m.insert("update_available", "Actualizar a v{}");
             m.insert("confirm_pending", "¿Mantener todos los cambios?");
+
+            // Terminal / Terminal
+            m.insert("cli_description", "Panel de control de escritorio para Hyprland.");
+            m.insert("cli_usage", "Uso: hyprdesk [OPCIÓN]");
+            m.insert("cli_opt_version", "muestra la versión y sale");
+            m.insert("cli_opt_help", "muestra esta ayuda y sale");
+            m.insert("cli_no_args", "Sin ninguna opción, abre la interfaz gráfica.");
+            m.insert("cli_unknown", "Opción desconocida: {}");
             m
         }),
         _ => EN.get_or_init(|| {
@@ -242,6 +250,14 @@ fn strings(lang: &str) -> &'static HashMap<&'static str, &'static str> {
             m.insert("toast_monitor_reverted", "Configuration reverted");
             m.insert("update_available", "Update to v{}");
             m.insert("confirm_pending", "Keep all changes?");
+
+            // Terminal / Terminal
+            m.insert("cli_description", "Desktop control panel for Hyprland.");
+            m.insert("cli_usage", "Usage: hyprdesk [OPTION]");
+            m.insert("cli_opt_version", "print the version and exit");
+            m.insert("cli_opt_help", "print this help and exit");
+            m.insert("cli_no_args", "With no options, opens the graphical interface.");
+            m.insert("cli_unknown", "Unknown option: {}");
             m
         }),
     }

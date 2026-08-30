@@ -214,9 +214,18 @@ pub enum Message {
 // ── Init / Inicialización ────────────────────────────────────
 
 impl App {
+    // Saves the config and refreshes the startup script, so a reboot restores these values / Guarda la configuración y refresca el script de arranque, para que un reinicio restaure estos valores
+    fn persist(&self) {
+        config::save_config(&self.config);
+        display::setup_autostart(&self.config);
+    }
+
     pub fn new() -> (Self, Task<Message>) {
         let config = config::load_config();
         crate::i18n::set_lang(&config.app_lang);
+
+        // Keep the startup script in step with the saved values / Mantiene el script de arranque al día con los valores guardados
+        display::setup_autostart(&config);
 
         let (method_name, available) = display::brightness_method();
         let brightness = if available {
@@ -362,7 +371,7 @@ impl App {
                     let old = self.config.brightness;
                     display::set_brightness(v, &self.config);
                     self.config.brightness = v;
-                    config::save_config(&self.config);
+                    self.persist();
                     if self.brightness_confirm.is_none() {
                         self.brightness_confirm = Some(ValueConfirm { old_value: old });
                     }
@@ -378,7 +387,7 @@ impl App {
                 let temp = self.night_temp;
                 let brightness = self.brightness;
                 display::apply_night_mode(enabled, temp, brightness);
-                config::save_config(&self.config);
+                self.persist();
                 Task::none()
             }
             Message::NightTempChanged(v) => {
@@ -396,7 +405,7 @@ impl App {
                     )
                 } else {
                     self.config.night_temp = v as u32;
-                    config::save_config(&self.config);
+                    self.persist();
                     Task::none()
                 }
             }
@@ -406,7 +415,7 @@ impl App {
                     display::apply_night_mode(true, v, self.brightness);
                     self.night_temp_committed = v;
                     self.config.night_temp = v;
-                    config::save_config(&self.config);
+                    self.persist();
                     if self.night_temp_confirm.is_none() {
                         self.night_temp_confirm = Some(ValueConfirm { old_value: old });
                     }
@@ -648,14 +657,14 @@ impl App {
                     self.brightness = c.old_value;
                     display::set_brightness(c.old_value, &self.config);
                     self.config.brightness = c.old_value;
-                    config::save_config(&self.config);
+                    self.persist();
                 }
                 if let Some(c) = self.night_temp_confirm.take() {
                     self.night_temp = c.old_value;
                     self.night_temp_committed = c.old_value;
                     display::apply_night_mode(true, c.old_value, self.brightness);
                     self.config.night_temp = c.old_value;
-                    config::save_config(&self.config);
+                    self.persist();
                 }
                 if let Some(c) = self.opacity_active_confirm.take() {
                     let v = c.old_value as f64 / 100.0;
