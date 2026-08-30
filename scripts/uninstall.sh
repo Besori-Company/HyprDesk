@@ -105,7 +105,11 @@ for icon in "$LEGACY_ICONS"/hd-*-symbolic.svg; do
 done
 if [ "$icon_count" -gt 0 ]; then
     gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
-    msg "✓ Removed $icon_count icons" "✓ Eliminados $icon_count iconos"
+    if [ "$icon_count" -eq 1 ]; then
+        msg "✓ Removed 1 icon" "✓ Eliminado 1 icono"
+    else
+        msg "✓ Removed $icon_count icons" "✓ Eliminados $icon_count iconos"
+    fi
     removed=1
 fi
 
