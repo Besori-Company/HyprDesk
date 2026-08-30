@@ -13,6 +13,9 @@ optdepends=(
     'wlsunset: night mode (alternative)'
 )
 makedepends=('rust' 'cargo' 'pkg-config' 'libxkbcommon')
+
+options=(!lto)
+
 source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
 # Regenerate after tagging the release / Regenerar tras etiquetar la release: makepkg -g
 sha256sums=('45d52b7b8d9152c3b669a5e6452aa4bffbf89306e76a2918b5e59e91677e0af3')
