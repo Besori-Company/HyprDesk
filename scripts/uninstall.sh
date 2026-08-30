@@ -6,13 +6,28 @@ set -e
 
 BIN="$HOME/.local/bin"
 DESK="$HOME/.local/share/applications"
-ICONS="$HOME/.local/share/icons/hicolor/scalable/apps"
+ICONS="$HOME/.local/share/icons/hicolor/256x256/apps"
+LEGACY_ICONS="$HOME/.local/share/icons/hicolor/scalable/apps"
 HYPR_CONF="$HOME/.config/hypr/hyprland.conf"
 HYPR_STARTUP="$HOME/.config/hypr/hyprdesk-startup.sh"
+HYPR_OPACITY="$HOME/.config/hypr/hyprdesk-opacity.conf"
+HYPR_LUA="$HOME/.config/hypr/hyprland.lua"
 
 SYS_LANG="${LANG%%_*}"
 msg() { [ "$SYS_LANG" = "es" ] && echo "$2" || echo "$1"; }
-ask() { [ "$SYS_LANG" = "es" ] && read -p "$2 " "$3" || read -p "$1 " "$3"; }
+# Answers come from the terminal, so `curl | bash` also works / Las respuestas vienen del terminal, para que `curl | bash` también funcione
+if exec 3< /dev/tty 2>/dev/null; then HAS_TTY=1; else HAS_TTY=0; fi
+
+ask() {
+    local prompt
+    if [ "$SYS_LANG" = "es" ]; then prompt="$2"; else prompt="$1"; fi
+    if [ "$HAS_TTY" = 0 ]; then
+        msg "No terminal available, nothing was removed." \
+            "No hay terminal disponible, no se ha eliminado nada."
+        exit 1
+    fi
+    read -r -u 3 -p "$prompt " "$3"
+}
 
 echo "══════════════════════════════════════"
 msg "  HyprDesk — uninstaller" "  HyprDesk — desinstalador"
@@ -25,6 +40,18 @@ if [[ ! "$ans" =~ ^[sSyY]$ ]]; then
     exit 0
 fi
 
+strip_block() {
+    local file="$1" pattern="$2" tmp
+    [ -f "$file" ] || return 0
+    tmp="$(mktemp)"
+    awk -v pat="$pattern" '
+        $0 ~ pat { if (n > 0 && lines[n] ~ /^[[:space:]]*$/) n--; next }
+        { lines[++n] = $0 }
+        END { for (i = 1; i <= n; i++) print lines[i] }
+    ' "$file" > "$tmp" && cat "$tmp" > "$file"
+    rm -f "$tmp"
+}
+
 removed=0
 
 # ── Binary and desktop entry / Binario y entrada de escritorio ───
@@ -34,7 +61,9 @@ update-desktop-database "$DESK" 2>/dev/null || true
 
 # ── Icons / Iconos ────────────────────────────────────────────
 icon_count=0
-for icon in "$ICONS"/hd-*-symbolic.svg; do
+[ -f "$ICONS/hyprdesk.png" ] && rm -f "$ICONS/hyprdesk.png" && icon_count=$((icon_count + 1))
+# Icons from older versions / Iconos de versiones anteriores
+for icon in "$LEGACY_ICONS"/hd-*-symbolic.svg; do
     [ -f "$icon" ] && rm -f "$icon" && icon_count=$((icon_count + 1))
 done
 if [ "$icon_count" -gt 0 ]; then
@@ -44,16 +73,34 @@ if [ "$icon_count" -gt 0 ]; then
 fi
 
 # ── Autostart / Inicio automático ─────────────────────────────
-if [ -f "$HYPR_STARTUP" ] || ([ -f "$HYPR_CONF" ] && grep -q "hyprdesk-startup.sh" "$HYPR_CONF"); then
+if [ -f "$HYPR_STARTUP" ] || grep -qs "hyprdesk-startup.sh" "$HYPR_CONF" "$HYPR_LUA"; then
     ask "Remove autostart from Hyprland config? [y/N]" \
         "¿Eliminar autostart de la config de Hyprland? [s/N]" ans_auto
     if [[ "$ans_auto" =~ ^[sSyY]$ ]]; then
         [ -f "$HYPR_STARTUP" ] && rm -f "$HYPR_STARTUP" && \
             msg "✓ Removed $HYPR_STARTUP" "✓ Eliminado $HYPR_STARTUP"
-        if [ -f "$HYPR_CONF" ] && grep -q "hyprdesk-startup.sh" "$HYPR_CONF"; then
-            sed -i '/# HyprDesk autostart/d; /hyprdesk-startup\.sh/d' "$HYPR_CONF"
-            msg "✓ Removed autostart line from hyprland.conf" \
-                "✓ Eliminada línea de autostart de hyprland.conf"
+        if grep -qs "hyprdesk-startup.sh" "$HYPR_CONF" "$HYPR_LUA"; then
+            strip_block "$HYPR_CONF" "HyprDesk autostart|hyprdesk-startup\\.sh"
+            strip_block "$HYPR_LUA"  "HyprDesk autostart|hyprdesk-startup\\.sh"
+            msg "✓ Removed autostart line from the Hyprland config" \
+                "✓ Eliminada la línea de autostart de la config de Hyprland"
+        fi
+        removed=1
+    fi
+fi
+
+# ── Per-app opacity / Opacidad por app ────────────────────────
+if [ -f "$HYPR_OPACITY" ] || grep -qs "hyprdesk-opacity" "$HYPR_CONF" "$HYPR_LUA"; then
+    ask "Remove per-app opacity rules from Hyprland config? [y/N]" \
+        "¿Eliminar las reglas de opacidad por app de la config de Hyprland? [s/N]" ans_op
+    if [[ "$ans_op" =~ ^[sSyY]$ ]]; then
+        rm -f "$HYPR_OPACITY" "$HOME/.config/hypr/hyprdesk-opacity.lua"
+        msg "✓ Removed the opacity file" "✓ Eliminado el fichero de opacidad"
+        if grep -qs "hyprdesk-opacity" "$HYPR_CONF" "$HYPR_LUA"; then
+            strip_block "$HYPR_CONF" "HyprDesk per-app opacity|hyprdesk-opacity"
+            strip_block "$HYPR_LUA"  "HyprDesk per-app opacity|hyprdesk-opacity"
+            msg "✓ Removed opacity line from the Hyprland config" \
+                "✓ Eliminada la línea de opacidad de la config de Hyprland"
         fi
         removed=1
     fi
