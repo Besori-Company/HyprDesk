@@ -30,5 +30,5 @@ Thumbs.db
 *.tar.gz
 *.zip
 
-# Compiled binary — built by scripts/build.sh / Binario compilado — lo genera scripts/build.sh
+# Compiled binary
 build/

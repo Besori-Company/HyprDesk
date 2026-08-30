@@ -27,12 +27,12 @@ fi
 
 removed=0
 
-# ── Binary and desktop entry ──────────────────────────────────
+# ── Binary and desktop entry / Binario y entrada de escritorio ───
 [ -f "$BIN/hyprdesk" ]          && rm -f "$BIN/hyprdesk"          && msg "✓ Removed $BIN/hyprdesk" "✓ Eliminado $BIN/hyprdesk" && removed=1
 [ -f "$DESK/hyprdesk.desktop" ] && rm -f "$DESK/hyprdesk.desktop" && msg "✓ Removed .desktop entry" "✓ Eliminado .desktop"      && removed=1
 update-desktop-database "$DESK" 2>/dev/null || true
 
-# ── Icons ─────────────────────────────────────────────────────
+# ── Icons / Iconos ────────────────────────────────────────────
 icon_count=0
 for icon in "$ICONS"/hd-*-symbolic.svg; do
     [ -f "$icon" ] && rm -f "$icon" && icon_count=$((icon_count + 1))
@@ -43,7 +43,7 @@ if [ "$icon_count" -gt 0 ]; then
     removed=1
 fi
 
-# ── Autostart ─────────────────────────────────────────────────
+# ── Autostart / Inicio automático ─────────────────────────────
 if [ -f "$HYPR_STARTUP" ] || ([ -f "$HYPR_CONF" ] && grep -q "hyprdesk-startup.sh" "$HYPR_CONF"); then
     ask "Remove autostart from Hyprland config? [y/N]" \
         "¿Eliminar autostart de la config de Hyprland? [s/N]" ans_auto
@@ -59,7 +59,7 @@ if [ -f "$HYPR_STARTUP" ] || ([ -f "$HYPR_CONF" ] && grep -q "hyprdesk-startup.s
     fi
 fi
 
-# ── Config and data ───────────────────────────────────────────
+# ── Config and data / Configuración y datos ───────────────────
 ask "Remove config and data (~/.config/hyprdesk)? [y/N]" \
     "¿Eliminar configuración (~/.config/hyprdesk)? [s/N]" ans_cfg
 if [[ "$ans_cfg" =~ ^[sSyY]$ ]]; then

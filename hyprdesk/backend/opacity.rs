@@ -1,5 +1,5 @@
 // Opacity backend — reads and writes global and per-app window opacity in hyprland config files.
-// Opacity backend — reads and writes global and per-app window opacity in hyprland config files.
+// Backend de opacidad — lee y escribe la opacidad global y por app de las ventanas en los ficheros de configuración de hyprland.
 
 use crate::config::hypr_dir;
 use regex::Regex;

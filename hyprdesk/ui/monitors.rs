@@ -16,7 +16,7 @@ use super::{App, Message};
 use super::theme::*;
 use super::widgets::*;
 
-// ── Canvas ──────────────────────────────────────────
+// ── Canvas / Lienzo ─────────────────────────────────
 
 pub struct MonitorCanvas {
     pub monitors: Vec<Monitor>,

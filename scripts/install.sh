@@ -162,7 +162,7 @@ else
 fi
 gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
 
-# .desktop entry
+# .desktop entry / Entrada .desktop
 cat > "$DESK/hyprdesk.desktop" << DESKTOP
 [Desktop Entry]
 Name=HyprDesk

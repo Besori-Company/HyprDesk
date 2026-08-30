@@ -987,7 +987,7 @@ impl App {
             })
             .into();
 
-        // Value confirm overlay — single shared timer for all sections
+        // Value confirm overlay — single shared timer for all sections / Aviso de valor confirmado — un solo temporizador compartido para todas las secciones
         let confirm_overlay: Option<Element<_>> = if let Some(seconds) = self.confirm_seconds {
             let pending = [
                 self.monitor_confirm.is_some(),
