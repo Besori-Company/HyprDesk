@@ -79,6 +79,8 @@ Downloads the latest precompiled binary and sets everything up. No Rust required
 
 ### Arch / Manjaro (AUR)
 
+> **Coming soon** — the package is not on the AUR yet. Use the quick install above in the meantime.
+
 ```bash
 yay -S hyprdesk
 # or

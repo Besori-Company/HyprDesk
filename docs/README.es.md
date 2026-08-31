@@ -79,6 +79,8 @@ Descarga el último binario precompilado y lo configura todo. No requiere Rust.
 
 ### Arch / Manjaro (AUR)
 
+> **Próximamente** — el paquete todavía no está en el AUR. Usa mientras tanto la instalación rápida de arriba.
+
 ```bash
 yay -S hyprdesk
 # o
