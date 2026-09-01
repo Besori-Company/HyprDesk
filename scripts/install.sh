@@ -23,9 +23,9 @@ elif command -v wget &>/dev/null; then
 fi
 
 if [ -z "$VERSION" ]; then
-    msg "Could not fetch latest version, falling back to build from source." \
-        "No se pudo obtener la última versión, se compilará desde el código fuente."
-    VERSION="source"
+    msg "Could not reach the GitHub API; installing the newest release anyway." \
+        "No se pudo contactar con la API de GitHub; se instalará igualmente la última versión."
+    VERSION=$(msg "latest" "última versión")
 fi
 
 echo "══════════════════════════════════════"
@@ -56,8 +56,10 @@ install_pkg() {
 
 # ── Download precompiled binary / Descargar binario ───────────
 ARCH=$(uname -m)
-BINARY_URL="https://github.com/$REPO/releases/download/$VERSION/hyprdesk-linux-$ARCH"
+# /latest/download/ redirects to the newest release, no API call and no rate limit / redirige a la última release, sin API ni límite de peticiones
+BINARY_URL="https://github.com/$REPO/releases/latest/download/hyprdesk-linux-$ARCH"
 BINARY=""
+SRC_DIR=""
 msg "Downloading HyprDesk $VERSION..." "Descargando HyprDesk $VERSION..."
 TMP=$(mktemp)
 if command -v curl &>/dev/null; then
@@ -68,8 +70,8 @@ fi
 
 if [ -z "$BINARY" ] || [ ! -s "$BINARY" ]; then
     BINARY=""
-    msg "Precompiled binary not available. Building from source..." \
-        "Binario precompilado no disponible. Compilando desde el código fuente..."
+    msg "No precompiled binary for $ARCH. Building from source..." \
+        "No hay binario precompilado para $ARCH. Compilando desde el código fuente..."
 fi
 
 # ── Build from source / Compilar desde el código fuente ───────
@@ -77,14 +79,54 @@ if [ -z "$BINARY" ]; then
     if ! command -v cargo &>/dev/null; then
         source "$HOME/.cargo/env" 2>/dev/null || true
     fi
-    if ! command -v cargo &>/dev/null; then
-        msg "Rust/Cargo not found. Install it with:" "Rust/Cargo no encontrado. Instálalo con:"
-        echo "  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
+
+    # Piped through curl there is no source tree on disk, so reuse a local checkout or clone one / con curl | bash no hay código en disco: se reutiliza una copia local o se clona
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || echo ".")"
+    if [ -f "$SCRIPT_DIR/../Cargo.toml" ] \
+       && grep -q '^name = "hyprdesk"' "$SCRIPT_DIR/../Cargo.toml" 2>/dev/null; then
+        SRC_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+    fi
+
+    # Report every missing tool at once instead of one per run / informa de todo lo que falta de una vez, no de uno en uno
+    MISSING=""
+    command -v cargo &>/dev/null || MISSING="Rust/Cargo"
+    if [ -z "$SRC_DIR" ] && ! command -v git &>/dev/null; then
+        MISSING="${MISSING:+$MISSING, }git"
+    fi
+
+    if [ -n "$MISSING" ]; then
+        echo ""
+        msg "Cannot build automatically. Missing: $MISSING" \
+            "No se puede compilar automáticamente. Falta: $MISSING"
+        msg "Install what is missing and then run these commands by hand:" \
+            "Instala lo que falte y luego ejecuta estos comandos a mano:"
+        echo ""
+        command -v cargo &>/dev/null || \
+            echo "  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
+        if [ -z "$SRC_DIR" ]; then
+            echo "  git clone https://github.com/$REPO.git"
+            echo "  cd HyprDesk"
+        fi
+        echo "  ./scripts/install.sh"
+        echo ""
+        rm -f "$TMP"
         exit 1
     fi
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    bash "$SCRIPT_DIR/build.sh"
-    BINARY="$(dirname "$SCRIPT_DIR")/build/hyprdesk"
+
+    if [ -z "$SRC_DIR" ]; then
+        SRC_DIR=$(mktemp -d)
+        trap 'rm -rf "$SRC_DIR"' EXIT
+        msg "Cloning the source..." "Clonando el código fuente..."
+        if ! git clone --depth 1 "https://github.com/$REPO.git" "$SRC_DIR" >/dev/null 2>&1; then
+            msg "Could not clone the repository. Check your connection." \
+                "No se pudo clonar el repositorio. Comprueba tu conexión."
+            exit 1
+        fi
+    fi
+
+    msg "Compiling (this takes a few minutes)..." "Compilando (esto tarda unos minutos)..."
+    bash "$SRC_DIR/scripts/build.sh"
+    BINARY="$SRC_DIR/build/hyprdesk"
 fi
 
 msg "✓ Binary ready" "✓ Binario listo"
@@ -143,22 +185,27 @@ echo ""
 
 # ── Install / Instalar ────────────────────────────────────────
 mkdir -p "$BIN" "$DESK" "$ICONS"
+# Unlink first: overwriting a running binary fails with "Text file busy" / desenlaza antes: sobrescribir un binario en ejecución da "Text file busy"
+rm -f "$BIN/hyprdesk"
 install -m 755 "$BINARY" "$BIN/hyprdesk"
 rm -f "$TMP"
 msg "✓ Installed to $BIN/hyprdesk" "✓ Instalado en $BIN/hyprdesk"
 
 # Icon / Icono
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOCAL_ICON="$(dirname "$SCRIPT_DIR")/hyprdesk/assets/icons/hyprdesk.png"
-if [ -f "$LOCAL_ICON" ]; then
+LOCAL_ICON=""
+[ -n "$SRC_DIR" ] && LOCAL_ICON="$SRC_DIR/hyprdesk/assets/icons/hyprdesk.png"
+if [ -n "$LOCAL_ICON" ] && [ -f "$LOCAL_ICON" ]; then
     cp "$LOCAL_ICON" "$ICONS/hyprdesk.png"
 else
     ICON_TMP=$(mktemp --suffix=.png)
+    ICON_URL="https://raw.githubusercontent.com/$REPO/main/hyprdesk/assets/icons/hyprdesk.png"
     if command -v curl &>/dev/null; then
-        curl -fsSL "https://raw.githubusercontent.com/$REPO/main/hyprdesk/assets/icons/hyprdesk.png" \
-            -o "$ICON_TMP" 2>/dev/null || true
+        curl -fsSL "$ICON_URL" -o "$ICON_TMP" 2>/dev/null || true
+    elif command -v wget &>/dev/null; then
+        wget -q "$ICON_URL" -O "$ICON_TMP" 2>/dev/null || true
     fi
     [ -s "$ICON_TMP" ] && cp "$ICON_TMP" "$ICONS/hyprdesk.png"
+    rm -f "$ICON_TMP"
 fi
 gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
 
