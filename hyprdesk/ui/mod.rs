@@ -460,11 +460,11 @@ impl App {
                 Task::none()
             }
             Message::MonitorPosXChanged(s) => {
-                self.monitor_pos_x = s;
+                self.monitor_pos_x = numeric_coord(&s);
                 Task::none()
             }
             Message::MonitorPosYChanged(s) => {
-                self.monitor_pos_y = s;
+                self.monitor_pos_y = numeric_coord(&s);
                 Task::none()
             }
             Message::MonitorApply => {
@@ -1293,6 +1293,38 @@ impl App {
                 danger: iced::Color::from_rgb8(0xE7, 0x4C, 0x3C),
             },
         )
+    }
+}
+
+pub const MAX_COORD: i32 = 32767;
+
+fn numeric_coord(s: &str) -> String {
+    let negative = s.starts_with('-');
+    let digits: String = s.chars().filter(|c| c.is_ascii_digit()).collect();
+    let significant = digits.trim_start_matches('0');
+    let over = significant.len() > 5 || significant.parse::<i32>().is_ok_and(|v| v > MAX_COORD);
+    let digits = if over { MAX_COORD.to_string() } else { digits };
+    if negative { format!("-{digits}") } else { digits }
+}
+
+#[cfg(test)]
+mod coord_tests {
+    use super::numeric_coord;
+
+    #[test]
+    fn strips_letters_and_keeps_the_sign() {
+        assert_eq!(numeric_coord("19a20"), "1920");
+        assert_eq!(numeric_coord("-1080"), "-1080");
+        assert_eq!(numeric_coord("abc"), "");
+        assert_eq!(numeric_coord("-"), "-");
+    }
+
+    #[test]
+    fn caps_at_the_screen_space_limit() {
+        assert_eq!(numeric_coord("99999"), "32767");
+        assert_eq!(numeric_coord("-99999"), "-32767");
+        assert_eq!(numeric_coord("123456789012"), "32767");
+        assert_eq!(numeric_coord("32767"), "32767");
     }
 }
 
