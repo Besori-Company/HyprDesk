@@ -394,25 +394,18 @@ impl App {
                 self.night_temp = v as u32;
                 let stamp = self.night_gen.wrapping_add(1);
                 self.night_gen = stamp;
-                let night_mode = self.night_mode;
-                if night_mode {
-                    Task::perform(
-                        async move {
-                            tokio::time::sleep(Duration::from_millis(400)).await;
-                            (stamp, v as u32)
-                        },
-                        |(stamp, v)| Message::NightTempApply(stamp, v),
-                    )
-                } else {
-                    self.config.night_temp = v as u32;
-                    self.persist();
-                    Task::none()
-                }
+                Task::perform(
+                    async move {
+                        tokio::time::sleep(Duration::from_millis(400)).await;
+                        (stamp, v as u32)
+                    },
+                    |(stamp, v)| Message::NightTempApply(stamp, v),
+                )
             }
             Message::NightTempApply(stamp, v) => {
                 if stamp == self.night_gen {
                     let old = self.night_temp_committed;
-                    display::apply_night_mode(true, v, self.brightness);
+                    display::apply_night_mode(self.night_mode, v, self.brightness);
                     self.night_temp_committed = v;
                     self.config.night_temp = v;
                     self.persist();
@@ -662,7 +655,7 @@ impl App {
                 if let Some(c) = self.night_temp_confirm.take() {
                     self.night_temp = c.old_value;
                     self.night_temp_committed = c.old_value;
-                    display::apply_night_mode(true, c.old_value, self.brightness);
+                    display::apply_night_mode(self.night_mode, c.old_value, self.brightness);
                     self.config.night_temp = c.old_value;
                     self.persist();
                 }
