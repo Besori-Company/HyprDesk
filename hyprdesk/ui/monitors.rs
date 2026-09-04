@@ -65,8 +65,11 @@ impl canvas::Program<Message> for MonitorCanvas {
             })
             .collect();
 
-        let (sc, (ox, oy)) =
-            compute_transform(&self.monitors, &positions, bounds.width as f64, bounds.height as f64);
+        let (sc, (ox, oy)) = if state.drag.is_some() {
+            (state.scale, state.offset)
+        } else {
+            compute_transform(&self.monitors, &positions, bounds.width as f64, bounds.height as f64)
+        };
 
         let mut frame = canvas::Frame::new(renderer, bounds.size());
 
@@ -207,9 +210,9 @@ impl canvas::Program<Message> for MonitorCanvas {
                     return None;
                 }
 
-                let cursor_pos = cursor
-                    .position_in(bounds)
-                    .unwrap_or_else(|| state.drag.as_ref().map(|d| d.cursor_start).unwrap_or(Point::ORIGIN));
+                let Some(cursor_pos) = cursor.position_from(bounds.position()) else {
+                    return Some(canvas::Action::request_redraw().and_capture());
+                };
 
                 let sc = state.scale;
                 let drag = state.drag.as_ref().unwrap();
@@ -218,22 +221,28 @@ impl canvas::Program<Message> for MonitorCanvas {
                 let raw_x = (drag.position_start.0 as f64 + dx).round() as i32;
                 let raw_y = (drag.position_start.1 as f64 + dy).round() as i32;
                 let drag_name = drag.name.clone();
-                let position_start = drag.position_start;
 
                 let live = state.live_positions.clone();
                 let (sx, sy) = snap_position(&self.monitors, &live, &drag_name, raw_x, raw_y, sc);
-                let (rx, ry) = resolve_overlap(&self.monitors, &live, &drag_name, sx, sy, position_start);
 
                 if let Some(d) = &mut state.drag {
-                    d.last_pos = (rx, ry);
+                    d.last_pos = (sx, sy);
                 }
-                state.live_positions.insert(drag_name, (rx, ry));
+                state.live_positions.insert(drag_name, (sx, sy));
                 Some(canvas::Action::request_redraw().and_capture())
             }
 
             canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
                 if let Some(drag) = state.drag.take() {
                     let (fx, fy) = drag.last_pos;
+                    let (fx, fy) = resolve_overlap(
+                        &self.monitors,
+                        &state.live_positions,
+                        &drag.name,
+                        fx,
+                        fy,
+                        drag.position_start,
+                    );
                     state.live_positions.clear();
                     return Some(canvas::Action::publish(Message::MonitorMoved(drag.name, fx, fy)));
                 }
@@ -384,9 +393,8 @@ fn resolve_overlap(
         None => return (x, y),
     };
     let (mw, mh) = mon.eff_size();
-    let ddx = x - start.0;
-    let ddy = y - start.1;
-    let primary_h = ddx.abs() >= ddy.abs();
+    let primary_h = (x - start.0).abs() >= (y - start.1).abs();
+    let nearest = |v: i32, a: i32, b: i32| if (v - a).abs() <= (v - b).abs() { a } else { b };
     let mut rx = x;
     let mut ry = y;
 
@@ -402,9 +410,9 @@ fn resolve_overlap(
                 continue;
             }
             if primary_h {
-                rx = if ddx >= 0 { ox - mw } else { ox + ow };
+                rx = nearest(rx, ox - mw, ox + ow);
             } else {
-                ry = if ddy >= 0 { oy - mh } else { oy + oh };
+                ry = nearest(ry, oy - mh, oy + oh);
             }
         }
         if (rx, ry) == prev {
@@ -412,6 +420,59 @@ fn resolve_overlap(
         }
     }
     (rx, ry)
+}
+
+#[cfg(test)]
+mod drag_tests {
+    use super::*;
+
+    fn mon(name: &str, x: i32, y: i32, w: i32, h: i32) -> Monitor {
+        Monitor {
+            name: name.to_string(),
+            description: None,
+            model: None,
+            width: w,
+            height: h,
+            refresh_rate: 60.0,
+            x,
+            y,
+            scale: 1.0,
+            transform: 0,
+            available_modes: Vec::new(),
+        }
+    }
+
+    fn pair() -> (Vec<Monitor>, HashMap<String, (i32, i32)>) {
+        let monitors = vec![mon("A", 0, 0, 1920, 1080), mon("B", 1920, 0, 1920, 1080)];
+        let positions = monitors.iter().map(|m| (m.name.clone(), (m.x, m.y))).collect();
+        (monitors, positions)
+    }
+
+    #[test]
+    fn a_shallow_overlap_slides_back_the_way_it_came() {
+        let (monitors, positions) = pair();
+        assert_eq!(resolve_overlap(&monitors, &positions, "B", 1800, 0, (1920, 0)), (1920, 0));
+    }
+
+    #[test]
+    fn dragged_past_the_middle_it_lands_on_the_far_side() {
+        let (monitors, positions) = pair();
+        assert_eq!(resolve_overlap(&monitors, &positions, "B", -200, 0, (1920, 0)), (-1920, 0));
+    }
+
+    #[test]
+    fn a_sideways_drag_never_escapes_upwards() {
+        let (monitors, positions) = pair();
+        let (_, ry) = resolve_overlap(&monitors, &positions, "B", 0, 0, (1920, 0));
+        assert_eq!(ry, 0);
+    }
+
+    #[test]
+    fn a_free_position_is_left_alone() {
+        let (monitors, positions) = pair();
+        assert_eq!(resolve_overlap(&monitors, &positions, "B", 1920, 1080, (1920, 0)), (1920, 1080));
+        assert_eq!(resolve_overlap(&monitors, &positions, "B", -1920, 0, (1920, 0)), (-1920, 0));
+    }
 }
 
 // ── Page view / Vista de página ──────────────────────────────

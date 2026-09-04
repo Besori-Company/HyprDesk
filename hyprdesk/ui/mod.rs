@@ -484,8 +484,18 @@ impl App {
                         )];
                     let new_transform = self.monitor_transform_idx as u32;
 
+                    // Measure the monitor as it will be once applied, not as it is now / Medir el monitor tal como quedará al aplicar, no como está ahora
+                    let mut probe = self.monitors.clone();
+                    if let Some(p) = probe.get_mut(self.selected_monitor) {
+                        if let Some((w, h)) = mon_backend::mode_size(&self.monitor_res_mode) {
+                            p.width = w;
+                            p.height = h;
+                        }
+                        p.scale = new_scale;
+                        p.transform = new_transform as i32;
+                    }
                     let clashes = mon_backend::overlapping(
-                        &self.monitors,
+                        &probe,
                         &self.monitor_positions,
                         &name,
                         new_x,

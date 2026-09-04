@@ -37,10 +37,13 @@ pub struct Monitor {
 
 impl Monitor {
     pub fn eff_size(&self) -> (i32, i32) {
+        let scale = if self.scale > 0.0 { self.scale } else { 1.0 };
+        let w = (self.width as f64 / scale).round() as i32;
+        let h = (self.height as f64 / scale).round() as i32;
         if self.transform == 1 || self.transform == 3 || self.transform == 5 || self.transform == 7 {
-            (self.height, self.width)
+            (h, w)
         } else {
-            (self.width, self.height)
+            (w, h)
         }
     }
 }
@@ -86,6 +89,13 @@ pub fn mode_label(mode: &str) -> String {
         }
     }
     mode.to_string()
+}
+
+// Pulls the resolution out of a mode string like 1920x1080@60.00Hz / Saca la resolución de una cadena de modo tipo 1920x1080@60.00Hz
+pub fn mode_size(mode: &str) -> Option<(i32, i32)> {
+    let (res, _) = mode.split_once('@')?;
+    let (w, h) = res.split_once('x')?;
+    Some((w.trim().parse().ok()?, h.trim().parse().ok()?))
 }
 
 pub fn current_mode(mon: &Monitor) -> String {
@@ -296,6 +306,30 @@ mod overlap_tests {
         monitors[0].transform = 1;
         assert!(overlapping(&monitors, &positions, "DP-1", 840, 0).is_empty());
         assert_eq!(overlapping(&monitors, &positions, "DP-1", 841, 0), ["HDMI-A-1"]);
+    }
+
+    #[test]
+    fn a_scaled_monitor_takes_its_logical_room() {
+        let mut m = mon("DP-1", 0, 0, 3840, 2160);
+        m.scale = 2.0;
+        assert_eq!(m.eff_size(), (1920, 1080));
+        m.transform = 1;
+        assert_eq!(m.eff_size(), (1080, 1920));
+    }
+
+    #[test]
+    fn scale_is_taken_into_account_before_reporting_a_clash() {
+        let mut big = mon("DP-1", 0, 0, 3840, 2160);
+        big.scale = 2.0;
+        let (monitors, positions) = layout(vec![big, mon("HDMI-A-1", 1920, 0, 1920, 1080)]);
+        assert!(overlapping(&monitors, &positions, "DP-1", 0, 0).is_empty());
+        assert_eq!(overlapping(&monitors, &positions, "DP-1", 1, 0), ["HDMI-A-1"]);
+    }
+
+    #[test]
+    fn a_mode_string_gives_up_its_resolution() {
+        assert_eq!(mode_size("1920x1080@60.00Hz"), Some((1920, 1080)));
+        assert_eq!(mode_size("preferred"), None);
     }
 
     #[test]
