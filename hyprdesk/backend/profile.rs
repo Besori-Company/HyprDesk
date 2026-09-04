@@ -44,15 +44,26 @@ pub fn get_avatar_path() -> Option<String> {
     if local.exists() { Some(local.to_string_lossy().into_owned()) } else { None }
 }
 
+pub const NAME_MAX_CHARS: usize = 64;
+const NAME_ILLEGAL: [char; 4] = [',', ':', '=', '"'];
+
+pub fn sanitize_display_name(s: &str) -> String {
+    s.chars()
+        .filter(|c| !NAME_ILLEGAL.contains(c) && !c.is_control())
+        .take(NAME_MAX_CHARS)
+        .collect()
+}
+
 pub fn set_display_name(name: &str) -> bool {
     let uid = libc_getuid();
     let obj_path = format!("/org/freedesktop/Accounts/User{uid}");
+    let quoted = format!("\"{}\"", name.replace('\\', "\\\\").replace('"', "\\\""));
     let out = Command::new("gdbus")
         .args(["call", "--system",
                "--dest", "org.freedesktop.Accounts",
                "--object-path", &obj_path,
                "--method", "org.freedesktop.Accounts.User.SetRealName",
-               &format!("\"{name}\"")])
+               &quoted])
         .output();
     if out.map(|o| o.status.success()).unwrap_or(false) {
         return true;
@@ -140,4 +151,34 @@ fn libc_getuid() -> u32 {
         .and_then(|o| String::from_utf8(o.stdout).ok())
         .and_then(|s| s.trim().parse().ok())
         .unwrap_or(1000)
+}
+
+#[cfg(test)]
+mod name_tests {
+    use super::*;
+
+    #[test]
+    fn gecos_separators_are_dropped() {
+        assert_eq!(sanitize_display_name("Ana, Maria"), "Ana Maria");
+        assert_eq!(sanitize_display_name("root:x=0"), "rootx0");
+        assert_eq!(sanitize_display_name("Ana \"la jefa\""), "Ana la jefa");
+    }
+
+    #[test]
+    fn control_characters_cannot_forge_a_passwd_line() {
+        assert_eq!(sanitize_display_name("Ana\nroot::0:0"), "Anaroot00");
+        assert_eq!(sanitize_display_name("Ana\tLopez"), "AnaLopez");
+    }
+
+    #[test]
+    fn accents_and_spaces_survive() {
+        assert_eq!(sanitize_display_name("Ainhoa Gracía Rodríguez"), "Ainhoa Gracía Rodríguez");
+    }
+
+    #[test]
+    fn a_long_name_is_cut_to_the_limit() {
+        let long = "a".repeat(NAME_MAX_CHARS + 20);
+        assert_eq!(sanitize_display_name(&long).chars().count(), NAME_MAX_CHARS);
+        assert!(sanitize_display_name(&"🙂".repeat(100)).len() <= 256);
+    }
 }

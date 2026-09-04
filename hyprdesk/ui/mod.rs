@@ -776,12 +776,13 @@ impl App {
 
             // Profile / Perfil
             Message::DisplayNameInputChanged(s) => {
-                self.display_name_input = s;
+                self.display_name_input = prof_backend::sanitize_display_name(&s);
                 Task::none()
             }
             Message::ApplyDisplayName => {
                 let name = self.display_name_input.trim().to_string();
                 if name.is_empty() {
+                    self.toast = Some(t("toast_name_empty"));
                     return Task::none();
                 }
                 if prof_backend::set_display_name(&name) {

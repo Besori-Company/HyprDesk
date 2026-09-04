@@ -107,6 +107,7 @@ fn strings(lang: &str) -> &'static HashMap<&'static str, &'static str> {
             m.insert("toast_photo_failed", "No se pudo cambiar la foto.");
             m.insert("toast_name_updated", "Nombre actualizado: {}");
             m.insert("toast_name_failed", "No se pudo cambiar el nombre.");
+            m.insert("toast_name_empty", "El nombre no puede estar vacío");
             m.insert("toast_locale_updated", "Idioma actualizado. Cierra sesión para aplicar.");
             m.insert("toast_locale_failed", "No se pudo cambiar el idioma del sistema.");
             m.insert("dialog_crop_title", "Ajustar foto de perfil");
@@ -222,6 +223,7 @@ fn strings(lang: &str) -> &'static HashMap<&'static str, &'static str> {
             m.insert("toast_photo_failed", "Could not change the photo.");
             m.insert("toast_name_updated", "Name updated: {}");
             m.insert("toast_name_failed", "Could not change the name.");
+            m.insert("toast_name_empty", "The name cannot be empty");
             m.insert("toast_locale_updated", "Language updated. Log out to apply.");
             m.insert("toast_locale_failed", "Could not change the system language.");
             m.insert("dialog_crop_title", "Adjust profile photo");
