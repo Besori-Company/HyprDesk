@@ -484,6 +484,18 @@ impl App {
                         )];
                     let new_transform = self.monitor_transform_idx as u32;
 
+                    let clashes = mon_backend::overlapping(
+                        &self.monitors,
+                        &self.monitor_positions,
+                        &name,
+                        new_x,
+                        new_y,
+                    );
+                    if !clashes.is_empty() {
+                        self.toast = Some(t("toast_monitor_overlap").replace("{}", &clashes.join(", ")));
+                        return Task::none();
+                    }
+
                     // Save other monitors' state before applying changes / Guardar el estado de los otros monitores antes de aplicar cambios
                     let others: Vec<(String, String, i32, i32, f64, u32)> = self.monitors.iter()
                         .filter(|m| m.name != name)

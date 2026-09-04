@@ -4,6 +4,7 @@
 use crate::config::hypr_dir;
 use regex::Regex;
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::fs;
 use std::process::{Command, Stdio};
 
@@ -42,6 +43,28 @@ impl Monitor {
             (self.width, self.height)
         }
     }
+}
+
+pub fn overlapping(
+    monitors: &[Monitor],
+    positions: &HashMap<String, (i32, i32)>,
+    name: &str,
+    x: i32,
+    y: i32,
+) -> Vec<String> {
+    let Some((mw, mh)) = monitors.iter().find(|m| m.name == name).map(|m| m.eff_size()) else {
+        return Vec::new();
+    };
+    monitors
+        .iter()
+        .filter(|other| other.name != name)
+        .filter(|other| {
+            let (ox, oy) = positions.get(&other.name).copied().unwrap_or((other.x, other.y));
+            let (ow, oh) = other.eff_size();
+            !(x + mw <= ox || x >= ox + ow || y + mh <= oy || y >= oy + oh)
+        })
+        .map(|other| other.name.clone())
+        .collect()
 }
 
 pub fn get_monitors() -> Vec<Monitor> {
@@ -221,5 +244,70 @@ pub fn get_primary_monitor_name() -> Option<String> {
     } else {
         let re = Regex::new(r"(?m)^[ \t]*workspace\s*=\s*1\s*,\s*monitor:([\w-]+)").ok()?;
         re.captures(&content).map(|c| c[1].to_string())
+    }
+}
+
+#[cfg(test)]
+mod overlap_tests {
+    use super::*;
+
+    fn mon(name: &str, x: i32, y: i32, w: i32, h: i32) -> Monitor {
+        Monitor {
+            name: name.to_string(),
+            description: None,
+            model: None,
+            width: w,
+            height: h,
+            refresh_rate: 60.0,
+            x,
+            y,
+            scale: 1.0,
+            transform: 0,
+            available_modes: Vec::new(),
+        }
+    }
+
+    fn layout(monitors: Vec<Monitor>) -> (Vec<Monitor>, HashMap<String, (i32, i32)>) {
+        let positions = monitors.iter().map(|m| (m.name.clone(), (m.x, m.y))).collect();
+        (monitors, positions)
+    }
+
+    fn pair() -> (Vec<Monitor>, HashMap<String, (i32, i32)>) {
+        layout(vec![mon("DP-1", 0, 0, 1920, 1080), mon("HDMI-A-1", 1920, 0, 1920, 1080)])
+    }
+
+    #[test]
+    fn touching_edges_are_not_an_overlap() {
+        let (monitors, positions) = pair();
+        assert!(overlapping(&monitors, &positions, "DP-1", 0, 0).is_empty());
+        assert!(overlapping(&monitors, &positions, "DP-1", 1920, 1080).is_empty());
+    }
+
+    #[test]
+    fn a_single_pixel_of_overlap_is_reported() {
+        let (monitors, positions) = pair();
+        assert_eq!(overlapping(&monitors, &positions, "DP-1", 1919, 0), ["HDMI-A-1"]);
+        assert_eq!(overlapping(&monitors, &positions, "DP-1", 2000, 500), ["HDMI-A-1"]);
+    }
+
+    #[test]
+    fn a_rotated_monitor_uses_its_swapped_size() {
+        let (mut monitors, positions) = pair();
+        monitors[0].transform = 1;
+        assert!(overlapping(&monitors, &positions, "DP-1", 840, 0).is_empty());
+        assert_eq!(overlapping(&monitors, &positions, "DP-1", 841, 0), ["HDMI-A-1"]);
+    }
+
+    #[test]
+    fn every_monitor_hit_at_once_is_named() {
+        let (monitors, positions) = layout(vec![
+            mon("DP-1", 0, 0, 1920, 1080),
+            mon("HDMI-A-1", 1920, 0, 1920, 1080),
+            mon("DP-2", 3840, 0, 1920, 1080),
+        ]);
+        assert_eq!(
+            overlapping(&monitors, &positions, "DP-1", 3000, 0),
+            ["HDMI-A-1", "DP-2"]
+        );
     }
 }

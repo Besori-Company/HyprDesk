@@ -66,6 +66,7 @@ fn strings(lang: &str) -> &'static HashMap<&'static str, &'static str> {
             m.insert("btn_apply_monitor", "Aplicar");
             m.insert("toast_monitor_applied", "Configuración de monitor aplicada");
             m.insert("toast_monitor_failed", "No se pudo aplicar la configuración");
+            m.insert("toast_monitor_overlap", "Esa posición se solapa con {}");
             m.insert("monitor_no_signal", "No se detectaron monitores");
             m.insert("section_primary", "Monitor principal");
             m.insert("row_primary", "Monitor principal");
@@ -180,6 +181,7 @@ fn strings(lang: &str) -> &'static HashMap<&'static str, &'static str> {
             m.insert("btn_apply_monitor", "Apply");
             m.insert("toast_monitor_applied", "Monitor settings applied");
             m.insert("toast_monitor_failed", "Could not apply monitor settings");
+            m.insert("toast_monitor_overlap", "That position overlaps {}");
             m.insert("monitor_no_signal", "No monitors detected");
             m.insert("section_primary", "Primary monitor");
             m.insert("row_primary", "Primary monitor");
