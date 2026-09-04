@@ -1024,42 +1024,44 @@ impl App {
             None
         };
 
-        if let Some(overlay) = confirm_overlay {
-            return iced::widget::stack([base, overlay]).into();
-        }
-
-        let final_view: Element<_> = if let Some(toast_msg) = &self.toast {
-            let toast = container(text(toast_msg).size(13).color(Color::WHITE))
-                .style(|_| container::Style {
-                    background: Some(iced::Background::Color(Color::from_rgba8(30, 30, 30, 0.902))),
-                    border: iced::Border {
-                        radius: 8.0.into(),
+        let toast_overlay: Option<Element<_>> = self
+            .toast
+            .as_ref()
+            .filter(|_| confirm_overlay.is_none())
+            .map(|toast_msg| {
+                let toast = container(text(toast_msg).size(13).color(Color::WHITE))
+                    .style(|_| container::Style {
+                        background: Some(iced::Background::Color(Color::from_rgba8(30, 30, 30, 0.902))),
+                        border: iced::Border {
+                            radius: 8.0.into(),
+                            ..Default::default()
+                        },
                         ..Default::default()
-                    },
-                    ..Default::default()
-                })
-                .padding(pad(8.0, 16.0, 8.0, 16.0));
+                    })
+                    .padding(pad(8.0, 16.0, 8.0, 16.0));
 
-            iced::widget::stack([
-                base,
                 container(toast)
                     .width(Length::Fill)
                     .height(Length::Fill)
                     .align_x(iced::alignment::Horizontal::Center)
                     .align_y(iced::alignment::Vertical::Bottom)
                     .padding(pad(0.0, 0.0, 24.0, 0.0))
-                    .into(),
-            ])
-            .into()
-        } else {
-            base
-        };
+                    .into()
+            });
 
-        if self.photo_crop.is_some() {
-            iced::widget::stack([final_view, profile::crop_modal_view(self)]).into()
-        } else {
-            final_view
-        }
+        let crop_overlay: Option<Element<_>> = self
+            .photo_crop
+            .is_some()
+            .then(|| profile::crop_modal_view(self));
+
+        let empty = || -> Element<'_, Message> { iced::widget::Space::new().into() };
+        iced::widget::stack([
+            base,
+            confirm_overlay.unwrap_or_else(empty),
+            toast_overlay.unwrap_or_else(empty),
+            crop_overlay.unwrap_or_else(empty),
+        ])
+        .into()
     }
 
     // ── Value confirm overlay / Overlay de confirmación de valor ─
