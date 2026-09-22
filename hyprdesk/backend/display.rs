@@ -191,9 +191,11 @@ fn apply_gamma(brightness_pct: u32, temp_k: u32) {
         }
         "wlsunset" => {
             kill_gamma_daemons();
+            std::thread::sleep(Duration::from_millis(200));
             let env = wayland_env();
+            let low = temp_k.saturating_sub(1).max(1);
             reap(Command::new(&tool)
-                .args(["-T", &temp_k.to_string()])
+                .args(["-t", &low.to_string(), "-T", &temp_k.to_string()])
                 .envs(&env)
                 .stdout(Stdio::null()).stderr(Stdio::null())
                 .spawn());
@@ -245,7 +247,7 @@ fn restore_commands(config: &Config, backlight: bool, tool: &str) -> String {
             ("hyprsunset", false) => {
                 format!("    {tool} -t {t} & sleep 1 && hyprctl hyprsunset gamma {b} || true")
             }
-            ("wlsunset", _) => format!("    {tool} -T {t} &"),
+            ("wlsunset", _) => format!("    {tool} -t {} -T {t} &", t.saturating_sub(1).max(1)),
             _ => String::new(),
         });
     }
@@ -332,7 +334,9 @@ mod tests {
         let gammastep = restore_commands(&cfg, true, "/usr/bin/gammastep");
         assert!(gammastep.contains("brightnessctl set 40%") && gammastep.contains("-O 3000"), "{gammastep}");
         assert!(!gammastep.contains(" -b "), "el brillo ya lo pone brightnessctl: {gammastep}");
-        assert!(restore_commands(&cfg, true, "/usr/bin/wlsunset").contains("-T 3000"));
+        // wlsunset refuses to start unless -T > -t / wlsunset se niega a arrancar si -T no es mayor que -t
+        let wlsunset = restore_commands(&cfg, true, "/usr/bin/wlsunset");
+        assert!(wlsunset.contains("-T 3000") && wlsunset.contains("-t 2999"), "{wlsunset}");
 
         // Night mode off restores neutral light / Con el modo noche apagado se restaura luz neutra
         let day = Config { night_mode: false, ..cfg.clone() };
