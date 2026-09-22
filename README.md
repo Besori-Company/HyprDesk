@@ -33,7 +33,7 @@ Full monitor management from a single panel:
 - Set any monitor as primary (assigns workspace 1)
 
 ### Opacity
-Fine-tune window transparency without touching any config file:
+Fine-tune window transparency without editing your own config files:
 - Global opacity for active and inactive windows
 - Per-app overrides, pick from open windows or type a class manually
 
@@ -138,7 +138,7 @@ Or if you have the repo cloned: `./scripts/uninstall.sh`
 
 ## Compatibility
 
-Tested on Fedora Linux 44 with Hyprland 0.55.1. Settings are applied live via `hyprctl` and written directly to your existing Hyprland config files — no new files created unless needed.
+Tested on Fedora Linux 44 with Hyprland 0.55.1, with both `hyprland.conf` and `hyprland.lua` configs. Settings are applied live via `hyprctl` and saved to HyprDesk's own file, `~/.config/hypr/hyprdesk.conf` (or `hyprdesk.lua`), loaded by one line at the end of your config. Your own files are not rewritten (only once, with a backup, to move over what older versions wrote), and a change Hyprland rejects is rolled back automatically.
 
 ---
 

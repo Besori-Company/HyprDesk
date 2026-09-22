@@ -1,11 +1,9 @@
-// Monitor backend — reads monitor info via hyprctl and writes configuration to hyprland.conf.
-// Backend de monitores — lee información de monitores con hyprctl y escribe la configuración en hyprland.conf.
+// Monitor backend — reads monitor info via hyprctl and saves layout and primary monitor in HyprDesk's own config file.
+// Backend de monitores — lee información de monitores con hyprctl y guarda el layout y el monitor principal en el fichero de config propio de HyprDesk.
 
-use crate::config::hypr_dir;
-use regex::Regex;
+use crate::backend::hyprconf::{self, MonitorRule, Provider};
 use serde::Deserialize;
 use std::collections::HashMap;
-use std::fs;
 use std::process::{Command, Stdio};
 
 pub const TRANSFORMS_EN: &[&str] = &[
@@ -111,150 +109,48 @@ pub fn closest_scale_idx(value: f64) -> u32 {
         .unwrap_or(2)
 }
 
-fn monitor_config_file() -> (std::path::PathBuf, bool) {
-    let hypr = hypr_dir();
-    if crate::config::is_lua_config() {
-        let candidates = [
-            hypr.join("monitors.lua"),
-            hypr.join("UserConfigs").join("monitors.lua"),
-            hypr.join("hyprland.lua"),
-        ];
-        for path in &candidates {
-            if path.exists() {
-                if let Ok(s) = fs::read_to_string(path) {
-                    if s.contains("monitor") { return (path.clone(), true); }
-                }
-            }
-        }
-        return (candidates[0].clone(), true);
-    }
-    let candidates = [
-        hypr.join("monitors.conf"),
-        hypr.join("UserConfigs").join("monitors.conf"),
-        hypr.join("hyprland.conf"),
-    ];
-    for path in &candidates {
-        if path.exists() {
-            if let Ok(s) = fs::read_to_string(path) {
-                if s.contains("monitor") { return (path.clone(), false); }
-            }
-        }
-    }
-    (candidates[0].clone(), false)
+pub fn monitor_rule(name: &str, mode: &str, x: i32, y: i32, scale: f64, transform: u32) -> MonitorRule {
+    MonitorRule { name: name.to_string(), mode: mode.to_string(), x, y, scale, transform }
 }
 
-fn workspace_config_file() -> (std::path::PathBuf, bool) {
-    let hypr = hypr_dir();
-    if crate::config::is_lua_config() {
-        let candidates = [
-            hypr.join("UserConfigs").join("UserSettings.lua"),
-            hypr.join("UserConfigs").join("01-UserDefaults.lua"),
-            hypr.join("hyprland.lua"),
-        ];
-        for path in &candidates {
-            if path.exists() {
-                if let Ok(s) = fs::read_to_string(path) {
-                    if Regex::new(r#"(?m)hl\.keyword\s*\(\s*"workspace"\s*,\s*"1\s*,"#)
-                        .map(|r| r.is_match(&s)).unwrap_or(false)
-                    {
-                        return (path.clone(), true);
-                    }
-                }
+// Writes every given monitor in one commit, a single reload instead of one per screen / Escribe todos los monitores en una sola confirmación, una recarga en vez de una por pantalla
+pub fn set_monitor_configs(rules: Vec<MonitorRule>) -> Result<(), String> {
+    let live = rules.clone();
+    hyprconf::update(
+        |state| {
+            for rule in rules {
+                state.set_monitor(rule);
             }
-        }
-        return (candidates[2].clone(), true);
-    }
-    let candidates = [
-        hypr.join("UserConfigs").join("UserSettings.conf"),
-        hypr.join("UserConfigs").join("01-UserDefaults.conf"),
-        hypr.join("hyprland.conf"),
-    ];
-    for path in &candidates {
-        if path.exists() {
-            if let Ok(s) = fs::read_to_string(path) {
-                if Regex::new(r"(?m)^workspace\s*=\s*1\s*,").map(|r| r.is_match(&s)).unwrap_or(false) {
-                    return (path.clone(), false);
-                }
-            }
-        }
-    }
-    (candidates[2].clone(), false)
+        },
+        |p, _| live.iter().map(|r| hyprconf::monitor_line(p, r)).collect(),
+        true,
+    )
 }
 
-pub fn set_monitor_config(name: &str, mode: &str, x: i32, y: i32, scale: f64, transform: u32) -> bool {
-    let conf_val = format!("{name},{mode},{x}x{y},{scale:.2},transform,{transform}");
-    let _ = Command::new("hyprctl")
-        .args(["keyword", "monitor", &conf_val])
-        .stdout(Stdio::null()).stderr(Stdio::null()).spawn();
+pub fn set_primary_monitor(name: &str) -> Result<(), String> {
+    hyprconf::update(
+        |state| state.primary = Some(name.to_string()),
+        |p, _| vec![hyprconf::primary_line(p, name)],
+        false,
+    )?;
+    move_workspace_one(name);
+    Ok(())
+}
 
-    let (conf_file, is_lua) = monitor_config_file();
-    let content = if conf_file.exists() { fs::read_to_string(&conf_file).unwrap_or_default() } else { String::new() };
-    let new = if is_lua {
-        let escaped = regex::escape(name);
-        let pat_str = format!(r#"(?m)^[ \t]*hl\.keyword\s*\(\s*"monitor"\s*,\s*"{}[^"]*"\s*\)\s*$"#, escaped);
-        let new_line = format!(r#"hl.keyword("monitor", "{conf_val}")"#);
-        if let Ok(re) = Regex::new(&pat_str) {
-            let cleaned = re.replace_all(&content, "").to_string();
-            let cleaned = Regex::new(r"\n{3,}").unwrap().replace_all(&cleaned, "\n\n").trim_end().to_string();
-            format!("{cleaned}\n{new_line}\n")
-        } else {
-            format!("{content}\n{new_line}\n")
-        }
-    } else {
-        let pat_str = format!(r"(?m)^[ \t]*monitor\s*=\s*{}[ \t]*,.*$", regex::escape(name));
-        let new_line = format!("monitor={conf_val}");
-        if let Ok(re) = Regex::new(&pat_str) {
-            let cleaned = re.replace_all(&content, "").to_string();
-            let cleaned = Regex::new(r"\n{3,}").unwrap().replace_all(&cleaned, "\n\n").trim_end().to_string();
-            format!("{cleaned}\n{new_line}\n")
-        } else {
-            format!("{content}\n{new_line}\n")
-        }
+// Brings workspace 1 over now instead of at the next login / Trae el espacio de trabajo 1 ahora en vez de en el próximo inicio de sesión
+fn move_workspace_one(name: &str) {
+    let args = match hyprconf::provider() {
+        Provider::Hyprlang => vec!["dispatch".to_string(), "moveworkspacetomonitor".to_string(), format!("1 {name}")],
+        Provider::Lua => vec![
+            "eval".to_string(),
+            format!("hl.dispatch(hl.dsp.workspace.move({{ workspace = \"1\", monitor = {} }}))", hyprconf::lua_str(name)),
+        ],
     };
-    if let Some(parent) = conf_file.parent() { let _ = fs::create_dir_all(parent); }
-    fs::write(&conf_file, new).is_ok()
-}
-
-pub fn set_primary_monitor(name: &str) -> bool {
-    let _ = Command::new("hyprctl")
-        .args(["dispatch", "moveworkspacetomonitor", &format!("1 {name}")])
-        .stdout(Stdio::null()).stderr(Stdio::null()).spawn();
-    let (conf_file, is_lua) = workspace_config_file();
-    let content = if conf_file.exists() { fs::read_to_string(&conf_file).unwrap_or_default() } else { String::new() };
-    let new = if is_lua {
-        let ws_val = format!("1, monitor:{name}, default:true");
-        let new_line = format!(r#"hl.keyword("workspace", "{ws_val}")"#);
-        let pat = r#"(?m)^[ \t]*hl\.keyword\s*\(\s*"workspace"\s*,\s*"1[ \t]*,.*"\s*\)\s*$"#;
-        if let Ok(re) = Regex::new(pat) {
-            if re.is_match(&content) {
-                re.replace(&content, new_line.as_str()).to_string()
-            } else {
-                format!("{}\n{new_line}\n", content.trim_end())
-            }
-        } else { return false }
-    } else {
-        let new_rule = format!("workspace = 1, monitor:{name}, default:true");
-        if let Ok(re) = Regex::new(r"(?m)^[ \t]*workspace\s*=\s*1\s*,.*$") {
-            if re.is_match(&content) {
-                re.replace(&content, new_rule.as_str()).to_string()
-            } else {
-                format!("{}\n{new_rule}\n", content.trim_end())
-            }
-        } else { return false }
-    };
-    fs::write(&conf_file, new).is_ok()
+    let _ = Command::new("hyprctl").args(&args).stdout(Stdio::null()).stderr(Stdio::null()).status();
 }
 
 pub fn get_primary_monitor_name() -> Option<String> {
-    let (conf_file, is_lua) = workspace_config_file();
-    let content = fs::read_to_string(&conf_file).ok()?;
-    if is_lua {
-        let re = Regex::new(r#"(?m)hl\.keyword\s*\(\s*"workspace"\s*,\s*"1[ \t]*,[ \t]*monitor:([\w-]+)"#).ok()?;
-        re.captures(&content).map(|c| c[1].to_string())
-    } else {
-        let re = Regex::new(r"(?m)^[ \t]*workspace\s*=\s*1\s*,\s*monitor:([\w-]+)").ok()?;
-        re.captures(&content).map(|c| c[1].to_string())
-    }
+    hyprconf::workspace_one_monitor()
 }
 
 #[cfg(test)]

@@ -81,10 +81,55 @@ pub fn night_tool_available() -> bool {
     gamma_tool().is_some()
 }
 
-fn kill_gamma_daemons() {
-    for name in &["hyprsunset", "gammastep", "wlsunset", "redshift"] {
-        let _ = Command::new("pkill").arg("-x").arg(name).output();
+// Waits for a daemon in the background so it leaves no zombie once it exits / Espera a un daemon en segundo plano para que no deje un zombi al terminar
+fn reap(child: std::io::Result<std::process::Child>) {
+    if let Ok(mut child) = child {
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
     }
+}
+
+// Stops only the daemons of the session HyprDesk runs in; a nested or second Hyprland keeps its own / Para solo los daemons de la sesión donde corre HyprDesk; un Hyprland anidado o segundo conserva los suyos
+fn kill_gamma_daemons() {
+    const NAMES: [&str; 4] = ["hyprsunset", "gammastep", "wlsunset", "redshift"];
+    let own = wayland_env();
+    let Ok(procs) = std::fs::read_dir("/proc") else { return };
+    for entry in procs.flatten() {
+        let Some(pid) = entry.file_name().to_str().and_then(|s| s.parse::<u32>().ok()) else { continue };
+        let comm = std::fs::read_to_string(entry.path().join("comm")).unwrap_or_default();
+        if !NAMES.contains(&comm.trim()) {
+            continue;
+        }
+        let environ = std::fs::read(entry.path().join("environ")).unwrap_or_default();
+        if same_session(&own, &parse_environ(&environ)) {
+            let _ = Command::new("kill").arg(pid.to_string()).output();
+        }
+    }
+}
+
+fn parse_environ(raw: &[u8]) -> std::collections::HashMap<String, String> {
+    raw.split(|b| *b == 0)
+        .filter_map(|var| std::str::from_utf8(var).ok()?.split_once('='))
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect()
+}
+
+// Same Hyprland instance when both know it, otherwise the same display in the same runtime dir / La misma instancia de Hyprland si ambos la conocen, si no el mismo display en el mismo runtime dir
+fn same_session(
+    own: &std::collections::HashMap<String, String>,
+    other: &std::collections::HashMap<String, String>,
+) -> bool {
+    let get = |env: &std::collections::HashMap<String, String>, key: &str| env.get(key).cloned().unwrap_or_default();
+    let (own_sig, other_sig) = (get(own, "HYPRLAND_INSTANCE_SIGNATURE"), get(other, "HYPRLAND_INSTANCE_SIGNATURE"));
+    if !own_sig.is_empty() && !other_sig.is_empty() {
+        return own_sig == other_sig;
+    }
+    if !get(own, "WAYLAND_DISPLAY").is_empty() {
+        return get(own, "WAYLAND_DISPLAY") == get(other, "WAYLAND_DISPLAY")
+            && get(own, "XDG_RUNTIME_DIR") == get(other, "XDG_RUNTIME_DIR");
+    }
+    get(own, "DISPLAY") == get(other, "DISPLAY")
 }
 
 fn apply_gamma(brightness_pct: u32, temp_k: u32) {
@@ -140,17 +185,18 @@ fn apply_gamma(brightness_pct: u32, temp_k: u32) {
                     .envs(&env)
                     .stdout(Stdio::null()).stderr(Stdio::null())
                     .spawn();
-                log(&format!("  spawn result: {:?}", result.map(|c| c.id())));
+                log(&format!("  spawn result: {:?}", result.as_ref().map(|c| c.id())));
+                reap(result);
             }
         }
         "wlsunset" => {
             kill_gamma_daemons();
             let env = wayland_env();
-            let _ = Command::new(&tool)
+            reap(Command::new(&tool)
                 .args(["-T", &temp_k.to_string()])
                 .envs(&env)
                 .stdout(Stdio::null()).stderr(Stdio::null())
-                .spawn();
+                .spawn());
         }
         _ => {}
     }
@@ -208,9 +254,10 @@ fn restore_commands(config: &Config, backlight: bool, tool: &str) -> String {
     lines.join("\n")
 }
 
-// Writes the startup script and hooks it into the Hyprland config / Escribe el script de arranque y lo engancha en la configuración de Hyprland
+// Writes the startup script and lists it in HyprDesk's own config file / Escribe el script de arranque y lo apunta en el fichero de config propio de HyprDesk
 pub fn setup_autostart(config: &Config) {
-    use crate::config::{hypr_conf, startup_script};
+    use crate::backend::hyprconf;
+    use crate::config::startup_script;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
 
@@ -225,33 +272,45 @@ pub fn setup_autostart(config: &Config) {
         let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o755));
     }
 
-    use crate::config::{hypr_lua, is_lua_config};
-    let (hypr, line) = if is_lua_config() {
-        (
-            hypr_lua(),
-            format!("\n-- HyprDesk autostart\nhl.keyword(\"exec-once\", \"{}\")\n", path.display()),
-        )
-    } else {
-        (
-            hypr_conf(),
-            format!("\n# HyprDesk autostart\nexec-once = {}\n", path.display()),
-        )
-    };
-    if hypr.exists() {
-        if let Ok(content) = fs::read_to_string(&hypr) {
-            if !content.contains("hyprdesk-startup.sh") {
-                let _ = fs::write(&hypr, content + &line);
-            }
-        }
+    // This runs with every saved value, so Hyprland is only touched when the entry is new / Esto corre con cada valor guardado, así que Hyprland solo se toca si la entrada es nueva
+    let entry = path.display().to_string();
+    if hyprconf::load_state().autostart.as_deref() != Some(entry.as_str()) {
+        let _ = hyprconf::update(|state| state.autostart = Some(entry.clone()), |_, _| Vec::new(), false);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
 
-    // Writes and rewrites the autostart in a throwaway HOME / Escribe y reescribe el autostart en un HOME desechable
+    fn env(vars: &[(&str, &str)]) -> std::collections::HashMap<String, String> {
+        vars.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+    }
+
+    // A nested Hyprland must never stop the night light of the real session / Un Hyprland anidado nunca debe parar la luz nocturna de la sesión real
+    #[test]
+    fn gamma_daemons_of_another_session_are_spared() {
+        let nested = env(&[("HYPRLAND_INSTANCE_SIGNATURE", "nested"), ("WAYLAND_DISPLAY", "wayland-1"), ("XDG_RUNTIME_DIR", "/run/user/1000/hdt")]);
+        let real = env(&[("HYPRLAND_INSTANCE_SIGNATURE", "real"), ("WAYLAND_DISPLAY", "wayland-1"), ("XDG_RUNTIME_DIR", "/run/user/1000")]);
+        assert!(!same_session(&nested, &real));
+        assert!(same_session(&real, &real.clone()));
+
+        // Started by systemd, without the signature: the display and runtime dir decide / Lanzado por systemd, sin la firma: deciden el display y el runtime dir
+        let service = env(&[("WAYLAND_DISPLAY", "wayland-1"), ("XDG_RUNTIME_DIR", "/run/user/1000")]);
+        assert!(same_session(&real, &service));
+        assert!(!same_session(&nested, &service));
+
+        // X11 tools only have DISPLAY / Las herramientas de X11 solo tienen DISPLAY
+        assert!(same_session(&env(&[("DISPLAY", ":0")]), &env(&[("DISPLAY", ":0")])));
+        assert!(!same_session(&env(&[("DISPLAY", ":0")]), &env(&[("DISPLAY", ":1")])));
+    }
+
+    #[test]
+    fn proc_environ_is_split_on_nul() {
+        let parsed = parse_environ(b"HYPRLAND_INSTANCE_SIGNATURE=abc\0XDG_RUNTIME_DIR=/run/user/1000\0BROKEN\0");
+        assert_eq!(parsed.get("HYPRLAND_INSTANCE_SIGNATURE").map(String::as_str), Some("abc"));
+        assert_eq!(parsed.len(), 2);
+    }
 
     // Every hardware combination writes what it must / Cada combinación de hardware escribe lo que debe
     #[test]
@@ -284,34 +343,4 @@ mod tests {
         assert_eq!(restore_commands(&cfg, false, ""), "");
     }
 
-    #[test]
-    fn autostart_is_written_once() {
-        let tmp = std::env::temp_dir().join("hyprdesk-autostart-test");
-        let _ = fs::remove_dir_all(&tmp);
-        fs::create_dir_all(tmp.join(".config/hypr")).unwrap();
-        let conf = tmp.join(".config/hypr/hyprland.conf");
-        let original = "monitor = , preferred, auto, 1\nexec-once = waybar\n";
-        fs::write(&conf, original).unwrap();
-        unsafe { std::env::set_var("HOME", &tmp) };
-
-        let cfg = Config { brightness: 42, ..Config::default() };
-        setup_autostart(&cfg);
-
-        let script = tmp.join(".config/hypr/hyprdesk-startup.sh");
-        assert!(script.exists(), "no se creó el script de arranque");
-        let text = fs::read_to_string(&conf).unwrap();
-        assert!(text.contains("hyprdesk-startup.sh"), "no se añadió el exec-once");
-
-        // Running it again must not duplicate the line / Ejecutarlo otra vez no debe duplicar la línea
-        setup_autostart(&cfg);
-        let text = fs::read_to_string(&conf).unwrap();
-        assert_eq!(text.matches("hyprdesk-startup.sh").count(), 1, "se duplicó el exec-once");
-
-        // Nothing else in the file may be touched / No se puede tocar nada más del fichero
-        for line in original.lines() {
-            assert!(text.contains(line), "se perdió una línea ajena: {line}");
-        }
-
-        let _ = fs::remove_dir_all(&tmp);
-    }
 }

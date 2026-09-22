@@ -52,34 +52,37 @@ pub fn view(app: &App) -> Element<'_, Message> {
     .width(Length::Fill)
     .style(slider_style(ACCENT));
 
-    let global_card = card(
-        Some(t("section_global_opacity")),
-        vec![
-            info_row(
-                Icon::Eye,
-                t("row_active_opacity"),
-                Some(t("row_active_opacity_sub")),
-                ACCENT,
-                Some(active_badge),
-            ),
-            card_sep(),
-            container(row![active_sl].padding(pad(4.0, 16.0, 14.0, 16.0)))
-                .width(Length::Fill)
-                .into(),
-            card_sep(),
-            info_row(
-                Icon::EyeOff,
-                t("row_inactive_opacity"),
-                Some(t("row_inactive_opacity_sub")),
-                ACCENT,
-                Some(inactive_badge),
-            ),
-            card_sep(),
-            container(row![inactive_sl].padding(pad(4.0, 16.0, 14.0, 16.0)))
-                .width(Length::Fill)
-                .into(),
-        ],
-    );
+    let mut global_rows: Vec<Element<'_, Message>> = vec![
+        info_row(
+            Icon::Eye,
+            t("row_active_opacity"),
+            Some(t("row_active_opacity_sub")),
+            ACCENT,
+            Some(active_badge),
+        ),
+        card_sep(),
+        container(row![active_sl].padding(pad(4.0, 16.0, 14.0, 16.0)))
+            .width(Length::Fill)
+            .into(),
+        card_sep(),
+        info_row(
+            Icon::EyeOff,
+            t("row_inactive_opacity"),
+            Some(t("row_inactive_opacity_sub")),
+            ACCENT,
+            Some(inactive_badge),
+        ),
+        card_sep(),
+        container(row![inactive_sl].padding(pad(4.0, 16.0, 14.0, 16.0)))
+            .width(Length::Fill)
+            .into(),
+    ];
+    // The user's config sets opacity again after HyprDesk / La config del usuario vuelve a poner la opacidad después de HyprDesk
+    if app.hypr_conflicts.opacity_active || app.hypr_conflicts.opacity_inactive {
+        global_rows.push(card_sep());
+        global_rows.push(info_row(Icon::Warning, t("row_overridden"), Some(t("row_overridden_sub")), AMBER, None));
+    }
+    let global_card = card(Some(t("section_global_opacity")), global_rows);
 
     let overrides_card = build_overrides_card(app);
 

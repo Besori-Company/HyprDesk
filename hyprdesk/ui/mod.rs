@@ -22,7 +22,7 @@ use iced::{
 
 use crate::backend::monitors::Monitor;
 use crate::backend::opacity::AppOpacity;
-use crate::backend::{display, monitors as mon_backend, opacity as op_backend, profile as prof_backend};
+use crate::backend::{display, hyprconf, migrate, monitors as mon_backend, opacity as op_backend, profile as prof_backend};
 use crate::config::{self, Config};
 use crate::i18n::t;
 use theme::*;
@@ -111,6 +111,10 @@ pub struct App {
     pub monitor_pos_x: String,
     pub monitor_pos_y: String,
     pub monitor_confirm: Option<MonitorConfirm>,
+    pub primary_monitor: Option<String>,
+
+    // Settings the user's own config overrides after HyprDesk's include / Ajustes que la config del usuario pisa tras el include de HyprDesk
+    pub hypr_conflicts: hyprconf::Conflicts,
 
     // Opacity / Opacidad
     pub opacity_available: bool,
@@ -224,6 +228,9 @@ impl App {
         let config = config::load_config();
         crate::i18n::set_lang(&config.app_lang);
 
+        // Moves 1.0.x leftovers into HyprDesk's own file before anything writes to it / Lleva los restos de 1.0.x al fichero propio de HyprDesk antes de que nada escriba en él
+        let migration = migrate::on_startup();
+
         // Keep the startup script in step with the saved values / Mantiene el script de arranque al día con los valores guardados
         display::setup_autostart(&config);
 
@@ -275,7 +282,11 @@ impl App {
         let app = App {
             page: Page::Brightness,
             config,
-            toast: None,
+            toast: migration.map(|r| {
+                t("toast_config_migrated")
+                    .replace("{n}", &r.moved.to_string())
+                    .replace("{path}", &r.backup.display().to_string())
+            }),
             brand_handle: image::Handle::from_bytes(
                 include_bytes!("../assets/icons/hyprdesk-ico.png").to_vec()
             ),
@@ -302,6 +313,8 @@ impl App {
             monitor_pos_x: pos_x,
             monitor_pos_y: pos_y,
             monitor_confirm: None,
+            primary_monitor: mon_backend::get_primary_monitor_name(),
+            hypr_conflicts: hyprconf::conflicts(),
 
             opacity_available: op_backend::hyprctl_available(),
             opacity_active: ops.active,
@@ -506,41 +519,35 @@ impl App {
                         return Task::none();
                     }
 
-                    // Save other monitors' state before applying changes / Guardar el estado de los otros monitores antes de aplicar cambios
-                    let others: Vec<(String, String, i32, i32, f64, u32)> = self.monitors.iter()
-                        .filter(|m| m.name != name)
-                        .map(|m| {
-                            let (ox, oy) = self.monitor_positions.get(&m.name).copied().unwrap_or((m.x, m.y));
-                            (m.name.clone(), mon_backend::current_mode(m), ox, oy, m.scale, m.transform as u32)
-                        })
-                        .collect();
-
-                    if mon_backend::set_monitor_config(
+                    // Every monitor goes in, so the file always describes the whole layout / Entran todos los monitores, así el fichero siempre describe el layout completo
+                    let mut rules = vec![mon_backend::monitor_rule(
                         &name,
                         &self.monitor_res_mode,
                         new_x,
                         new_y,
                         new_scale,
                         new_transform,
-                    ) {
-                        self.monitor_positions.insert(name.clone(), (new_x, new_y));
+                    )];
+                    rules.extend(self.monitors.iter().filter(|m| m.name != name).map(|m| {
+                        let (ox, oy) = self.monitor_positions.get(&m.name).copied().unwrap_or((m.x, m.y));
+                        mon_backend::monitor_rule(&m.name, &mon_backend::current_mode(m), ox, oy, m.scale, m.transform as u32)
+                    }));
 
-                        // Keep all monitors in sync in the config file / Mantener todos los monitores sincronizados en el archivo de configuración
-                        for (oname, omode, ox, oy, oscale, otransform) in others {
-                            let _ = mon_backend::set_monitor_config(&oname, &omode, ox, oy, oscale, otransform);
+                    match mon_backend::set_monitor_configs(rules) {
+                        Ok(()) => {
+                            self.monitor_positions.insert(name.clone(), (new_x, new_y));
+                            self.hypr_conflicts = hyprconf::conflicts();
+                            self.monitor_confirm = Some(MonitorConfirm {
+                                monitor_name: name,
+                                old_mode,
+                                old_x,
+                                old_y,
+                                old_scale,
+                                old_transform,
+                            });
+                            self.confirm_seconds = Some(15);
                         }
-
-                        self.monitor_confirm = Some(MonitorConfirm {
-                            monitor_name: name,
-                            old_mode,
-                            old_x,
-                            old_y,
-                            old_scale,
-                            old_transform,
-                        });
-                        self.confirm_seconds = Some(15);
-                    } else {
-                        self.toast = Some(t("toast_monitor_failed"));
+                        Err(e) => self.toast = Some(failure(t("toast_monitor_failed"), &e)),
                     }
                 }
                 Task::none()
@@ -548,10 +555,13 @@ impl App {
             Message::MonitorSetPrimary => {
                 if let Some(mon) = self.monitors.get(self.selected_monitor) {
                     let name = mon.name.clone();
-                    if mon_backend::set_primary_monitor(&name) {
-                        self.toast = Some(t("toast_primary_set"));
-                    } else {
-                        self.toast = Some(t("toast_monitor_failed"));
+                    match mon_backend::set_primary_monitor(&name) {
+                        Ok(()) => {
+                            self.primary_monitor = Some(name);
+                            self.hypr_conflicts = hyprconf::conflicts();
+                            self.toast = Some(t("toast_primary_set"));
+                        }
+                        Err(e) => self.toast = Some(failure(t("toast_monitor_failed"), &e)),
                     }
                 }
                 Task::none()
@@ -572,8 +582,9 @@ impl App {
             }
             Message::OpacityActiveApply(stamp, v) => {
                 if stamp == self.opacity_active_gen {
-                    let ok = op_backend::set_opacity("active", v);
-                    if ok {
+                    let result = op_backend::set_opacity("active", v);
+                    self.hypr_conflicts = hyprconf::conflicts();
+                    if result.is_ok() {
                         let old = (self.config.opacity_active * 100.0) as u32;
                         self.config.opacity_active = v;
                         config::save_config(&self.config);
@@ -581,8 +592,8 @@ impl App {
                             self.opacity_active_confirm = Some(ValueConfirm { old_value: old });
                         }
                         self.confirm_seconds = Some(15);
-                    } else {
-                        self.toast = Some(t("toast_opacity_failed"));
+                    } else if let Err(e) = result {
+                        self.toast = Some(failure(t("toast_opacity_failed"), &e));
                     }
                 }
                 Task::none()
@@ -601,8 +612,9 @@ impl App {
             }
             Message::OpacityInactiveApply(stamp, v) => {
                 if stamp == self.opacity_inactive_gen {
-                    let ok = op_backend::set_opacity("inactive", v);
-                    if ok {
+                    let result = op_backend::set_opacity("inactive", v);
+                    self.hypr_conflicts = hyprconf::conflicts();
+                    if result.is_ok() {
                         let old = (self.config.opacity_inactive * 100.0) as u32;
                         self.config.opacity_inactive = v;
                         config::save_config(&self.config);
@@ -610,8 +622,8 @@ impl App {
                             self.opacity_inactive_confirm = Some(ValueConfirm { old_value: old });
                         }
                         self.confirm_seconds = Some(15);
-                    } else {
-                        self.toast = Some(t("toast_opacity_failed"));
+                    } else if let Err(e) = result {
+                        self.toast = Some(failure(t("toast_opacity_failed"), &e));
                     }
                 }
                 Task::none()
@@ -633,7 +645,10 @@ impl App {
             }
             Message::AppOpacityApply(app, stamp, v) => {
                 if stamp == self.opacity_active_gen {
-                    op_backend::set_app_opacity(&app, v);
+                    if let Err(e) = op_backend::set_app_opacity(&app, v) {
+                        self.toast = Some(failure(t("toast_override_failed"), &e));
+                        return Task::none();
+                    }
                     let old = *self.app_opacity_committed.get(&app).unwrap_or(&v);
                     self.app_opacity_committed.insert(app.clone(), v);
                     match &self.app_opacity_confirm {
@@ -683,34 +698,34 @@ impl App {
                 }
                 if let Some(c) = self.opacity_active_confirm.take() {
                     let v = c.old_value as f64 / 100.0;
-                    op_backend::set_opacity("active", v);
+                    let _ = op_backend::set_opacity("active", v);
                     self.opacity_active = v;
                     self.config.opacity_active = v;
                     config::save_config(&self.config);
                 }
                 if let Some(c) = self.opacity_inactive_confirm.take() {
                     let v = c.old_value as f64 / 100.0;
-                    op_backend::set_opacity("inactive", v);
+                    let _ = op_backend::set_opacity("inactive", v);
                     self.opacity_inactive = v;
                     self.config.opacity_inactive = v;
                     config::save_config(&self.config);
                 }
                 if let Some(c) = self.app_opacity_confirm.take() {
-                    op_backend::set_app_opacity(&c.app, c.old_value);
+                    let _ = op_backend::set_app_opacity(&c.app, c.old_value);
                     self.app_opacity_committed.insert(c.app.clone(), c.old_value);
                     if let Some(entry) = self.app_opacities.iter_mut().find(|e| e.app == c.app) {
                         entry.active = c.old_value;
                     }
                 }
                 if let Some(c) = self.monitor_confirm.take() {
-                    mon_backend::set_monitor_config(
+                    let _ = mon_backend::set_monitor_configs(vec![mon_backend::monitor_rule(
                         &c.monitor_name,
                         &c.old_mode,
                         c.old_x,
                         c.old_y,
                         c.old_scale,
                         c.old_transform,
-                    );
+                    )]);
                     self.monitor_positions.insert(c.monitor_name.clone(), (c.old_x, c.old_y));
                     if let Some(idx) = self.monitors.iter().position(|m| m.name == c.monitor_name) {
                         if idx == self.selected_monitor {
@@ -723,6 +738,7 @@ impl App {
                     }
                     self.toast = Some(t("toast_monitor_reverted"));
                 }
+                self.hypr_conflicts = hyprconf::conflicts();
                 self.confirm_seconds = None;
                 Task::none()
             }
@@ -737,7 +753,7 @@ impl App {
                 if self.app_opacities.iter().any(|e| e.app == class) {
                     return Task::none();
                 }
-                if op_backend::set_app_opacity(&class, 0.9) {
+                if op_backend::set_app_opacity(&class, 0.9).is_ok() {
                     self.app_opacities.push(AppOpacity { app: class.clone(), active: 0.9 });
                     self.opacity_custom_input.clear();
                     self.opacity_selected_class = None;
@@ -749,7 +765,7 @@ impl App {
                 Task::none()
             }
             Message::RemoveAppOverride(app) => {
-                if op_backend::remove_app_opacity(&app) {
+                if op_backend::remove_app_opacity(&app).is_ok() {
                     self.app_opacities.retain(|e| e.app != app);
                     self.toast = Some(t("toast_override_removed").replace("{}", &app));
                     self.open_window_classes = op_backend::get_open_window_classes();
@@ -1316,6 +1332,14 @@ impl App {
                 danger: iced::Color::from_rgb8(0xE7, 0x4C, 0x3C),
             },
         )
+    }
+}
+
+// Adds the first line of Hyprland's complaint to a toast / Añade al toast la primera línea de la queja de Hyprland
+fn failure(base: String, detail: &str) -> String {
+    match detail.lines().map(str::trim).find(|l| !l.is_empty()) {
+        Some(line) => format!("{base}: {}", line.chars().take(120).collect::<String>()),
+        None => base,
     }
 }
 

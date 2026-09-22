@@ -12,6 +12,8 @@ HYPR_CONF="$HOME/.config/hypr/hyprland.conf"
 HYPR_STARTUP="$HOME/.config/hypr/hyprdesk-startup.sh"
 HYPR_OPACITY="$HOME/.config/hypr/hyprdesk-opacity.conf"
 HYPR_LUA="$HOME/.config/hypr/hyprland.lua"
+HYPR_OWN_CONF="$HOME/.config/hypr/hyprdesk.conf"
+HYPR_OWN_LUA="$HOME/.config/hypr/hyprdesk.lua"
 
 SYS_LANG="${LANG%%_*}"
 msg() { [ "$SYS_LANG" = "es" ] && echo "$2" || echo "$1"; }
@@ -113,43 +115,29 @@ if [ "$icon_count" -gt 0 ]; then
     removed=1
 fi
 
-# ── Autostart / Inicio automático ─────────────────────────────
-if [ -f "$HYPR_STARTUP" ] || grep -qs "hyprdesk-startup.sh" "$HYPR_CONF" "$HYPR_LUA"; then
-    ask "Remove autostart from Hyprland config? [y/N]" \
-        "¿Eliminar autostart de la config de Hyprland? [s/N]" ans_auto
-    if [[ "$ans_auto" =~ ^[sSyY]$ ]]; then
-        [ -f "$HYPR_STARTUP" ] && rm -f "$HYPR_STARTUP" && \
-            msg "✓ Removed $HYPR_STARTUP" "✓ Eliminado $HYPR_STARTUP"
-        if grep -qs "hyprdesk-startup.sh" "$HYPR_CONF" "$HYPR_LUA"; then
-            strip_block "$HYPR_CONF" "HyprDesk autostart|hyprdesk-startup\\.sh"
-            strip_block "$HYPR_LUA"  "HyprDesk autostart|hyprdesk-startup\\.sh"
-            msg "✓ Removed autostart line from the Hyprland config" \
-                "✓ Eliminada la línea de autostart de la config de Hyprland"
-        fi
-        removed=1
-    fi
-fi
-
-# ── Per-app opacity / Opacidad por app ────────────────────────
-if [ -f "$HYPR_OPACITY" ] || grep -qs "hyprdesk-opacity" "$HYPR_CONF" "$HYPR_LUA"; then
-    ask "Remove per-app opacity rules from Hyprland config? [y/N]" \
-        "¿Eliminar las reglas de opacidad por app de la config de Hyprland? [s/N]" ans_op
-    if [[ "$ans_op" =~ ^[sSyY]$ ]]; then
-        rm -f "$HYPR_OPACITY" "$HOME/.config/hypr/hyprdesk-opacity.lua"
-        msg "✓ Removed the opacity file" "✓ Eliminado el fichero de opacidad"
-        if grep -qs "hyprdesk-opacity" "$HYPR_CONF" "$HYPR_LUA"; then
-            strip_block "$HYPR_CONF" "HyprDesk per-app opacity|hyprdesk-opacity"
-            strip_block "$HYPR_LUA"  "HyprDesk per-app opacity|hyprdesk-opacity"
-            msg "✓ Removed opacity line from the Hyprland config" \
-                "✓ Eliminada la línea de opacidad de la config de Hyprland"
+# ── Hyprland settings / Ajustes de Hyprland ───────────────────
+if [ -f "$HYPR_OWN_CONF" ] || [ -f "$HYPR_OWN_LUA" ] || [ -f "$HYPR_STARTUP" ] || [ -f "$HYPR_OPACITY" ] \
+    || grep -qs "hyprdesk" "$HYPR_CONF" "$HYPR_LUA"; then
+    ask "Remove HyprDesk's settings from Hyprland (monitors, opacity, autostart)? [y/N]" \
+        "¿Eliminar los ajustes de HyprDesk de Hyprland (monitores, opacidad, autostart)? [s/N]" ans_hypr
+    if [[ "$ans_hypr" =~ ^[sSyY]$ ]]; then
+        # Includes go before their files, Lua reports a missing module as an error / Los include se quitan antes que sus ficheros, Lua da error si falta un módulo
+        strip_block "$HYPR_CONF" '^[[:space:]]*# HyprDesk|^[[:space:]]*source[[:space:]]*=.*hyprdesk(-opacity)?[.]conf|^[[:space:]]*exec-once.*hyprdesk-startup[.]sh'
+        strip_block "$HYPR_LUA"  '^[[:space:]]*-- HyprDesk|require.*hyprdesk|dofile.*hyprdesk-opacity|hl[.]keyword.*hyprdesk-startup[.]sh'
+        rm -f "$HYPR_OWN_CONF" "$HYPR_OWN_LUA" "$HYPR_STARTUP" "$HYPR_OPACITY" "$HOME/.config/hypr/hyprdesk-opacity.lua"
+        msg "✓ Removed HyprDesk's settings from the Hyprland config" \
+            "✓ Eliminados los ajustes de HyprDesk de la config de Hyprland"
+        if [ -d "$HOME/.config/hyprdesk/backups" ]; then
+            msg "  Copies of the files HyprDesk migrated are in ~/.config/hyprdesk/backups" \
+                "  Las copias de los ficheros que migró HyprDesk están en ~/.config/hyprdesk/backups"
         fi
         removed=1
     fi
 fi
 
 # ── Config and data / Configuración y datos ───────────────────
-ask "Remove config and data (~/.config/hyprdesk)? [y/N]" \
-    "¿Eliminar configuración (~/.config/hyprdesk)? [s/N]" ans_cfg
+ask "Remove config, data and backups (~/.config/hyprdesk)? [y/N]" \
+    "¿Eliminar configuración, datos y copias (~/.config/hyprdesk)? [s/N]" ans_cfg
 if [[ "$ans_cfg" =~ ^[sSyY]$ ]]; then
     rm -rf "$HOME/.config/hyprdesk"
     msg "✓ Removed ~/.config/hyprdesk" "✓ Eliminado ~/.config/hyprdesk"

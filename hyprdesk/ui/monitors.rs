@@ -669,23 +669,26 @@ fn monitor_settings<'a>(
     ));
 
     // Primary / Monitor principal
-    let primary_name = monitors::get_primary_monitor_name();
+    let primary_name = app.primary_monitor.clone();
     let is_primary = primary_name.as_deref() == Some(selected_name);
     let primary_trailing = if is_primary {
         chip_label(&t("chip_primary"), SUCCESS)
     } else {
         primary_button(&t("btn_set_primary"), Message::MonitorSetPrimary)
     };
-    out.push(card(
-        Some(t("section_primary")),
-        vec![info_row(
-            Icon::Star,
-            t("row_primary"),
-            Some(t("row_primary_sub")),
-            AMBER,
-            Some(primary_trailing),
-        )],
-    ));
+    let mut primary_rows = vec![info_row(
+        Icon::Star,
+        t("row_primary"),
+        Some(t("row_primary_sub")),
+        AMBER,
+        Some(primary_trailing),
+    )];
+    // The user's config sends workspace 1 elsewhere after HyprDesk / La config del usuario manda el espacio 1 a otro sitio después de HyprDesk
+    if app.hypr_conflicts.primary {
+        primary_rows.push(card_sep());
+        primary_rows.push(info_row(Icon::Warning, t("row_overridden"), Some(t("row_overridden_sub")), AMBER, None));
+    }
+    out.push(card(Some(t("section_primary")), primary_rows));
 
     // Apply / Aplicar
     let action_row: Element<_> = {

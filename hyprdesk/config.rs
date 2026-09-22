@@ -55,18 +55,6 @@ pub fn startup_script() -> PathBuf {
     hypr_dir().join("hyprdesk-startup.sh")
 }
 
-pub fn hypr_conf() -> PathBuf {
-    hypr_dir().join("hyprland.conf")
-}
-
-pub fn hypr_lua() -> PathBuf {
-    hypr_dir().join("hyprland.lua")
-}
-
-pub fn is_lua_config() -> bool {
-    hypr_dir().join("hyprland.lua").exists()
-}
-
 pub fn load_config() -> Config {
     let path = config_dir().join("config.json");
     if path.exists() {

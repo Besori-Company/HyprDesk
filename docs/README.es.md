@@ -33,7 +33,7 @@ Gestión completa de monitores desde un único panel:
 - Establece cualquier monitor como principal (asigna el workspace 1)
 
 ### Opacidad
-Ajusta la transparencia de las ventanas sin tocar ningún archivo de configuración:
+Ajusta la transparencia de las ventanas sin editar tus propios archivos de configuración:
 - Opacidad global para ventanas activas e inactivas
 - Overrides por aplicación, elige entre las apps abiertas o escribe la clase manualmente
 
@@ -138,7 +138,7 @@ O si tienes el repositorio clonado: `./scripts/uninstall.sh`
 
 ## Compatibilidad
 
-Probado en Fedora Linux 44 con Hyprland 0.55.1. Los ajustes se aplican en vivo mediante `hyprctl` y se escriben directamente en tus archivos de configuración de Hyprland existentes — sin crear archivos nuevos salvo que sea necesario.
+Probado en Fedora Linux 44 con Hyprland 0.55.1, tanto con `hyprland.conf` como con `hyprland.lua`. Los ajustes se aplican en vivo mediante `hyprctl` y se guardan en el fichero propio de HyprDesk, `~/.config/hypr/hyprdesk.conf` (o `hyprdesk.lua`), cargado con una sola línea al final de tu config. Tus propios archivos no se reescriben (solo una vez, con copia de seguridad, para traer lo que escribieron versiones anteriores), y un cambio que Hyprland rechace se deshace automáticamente.
 
 ---
 

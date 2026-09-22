@@ -18,5 +18,7 @@ if [ -z "$BUILT" ]; then
 fi
 
 mkdir -p build
+# Unlinked first, a running copy would otherwise make cp fail / Se borra antes, si no una copia en marcha haría fallar cp
+rm -f build/hyprdesk
 cp "$BUILT" build/hyprdesk
 echo "Built: build/hyprdesk"
