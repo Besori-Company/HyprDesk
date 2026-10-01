@@ -1,7 +1,7 @@
 <p align="right"><a href="../README.md">English</a></p>
 
 <p align="center">
-  <img src="screenshots/Banner.png" width="480" alt="HyprDesk">
+  <img src="screenshots/Banner.png" width="595" alt="HyprDesk">
 </p>
 
 <p align="center">
