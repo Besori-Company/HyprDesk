@@ -672,7 +672,7 @@ fn monitor_settings<'a>(
     let primary_name = app.primary_monitor.clone();
     let is_primary = primary_name.as_deref() == Some(selected_name);
     let primary_trailing = if is_primary {
-        chip_label(&t("chip_primary"), SUCCESS)
+        chip_label(&t("chip_primary"), AMBER)
     } else {
         primary_button(&t("btn_set_primary"), Message::MonitorSetPrimary)
     };

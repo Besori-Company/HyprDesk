@@ -21,6 +21,8 @@ pub enum Icon {
     Person,
     Globe,
     Star,
+    Check,
+    Download,
     Warning,
     Move,
     Rotate,
@@ -40,6 +42,8 @@ impl Icon {
             Icon::Person  => include_bytes!("../assets/icons/person.svg"),
             Icon::Globe   => include_bytes!("../assets/icons/globe.svg"),
             Icon::Star    => include_bytes!("../assets/icons/star.svg"),
+            Icon::Check   => include_bytes!("../assets/icons/check.svg"),
+            Icon::Download => include_bytes!("../assets/icons/download.svg"),
             Icon::Warning => include_bytes!("../assets/icons/warning.svg"),
             Icon::Move    => include_bytes!("../assets/icons/move.svg"),
             Icon::Rotate  => include_bytes!("../assets/icons/rotate.svg"),
@@ -193,13 +197,23 @@ pub fn value_badge<'a>(val: impl Into<String>, color: Color) -> Element<'a, Mess
 }
 
 pub fn chip_label<'a>(label: impl Into<String>, color: Color) -> Element<'a, Message> {
-    container(text(label.into()).size(12).color(color).font(iced::Font {
-        weight: iced::font::Weight::Semibold,
-        ..NUNITO
-    }))
-        .style(chip_style(color))
-        .padding(pad(3.0, 8.0, 3.0, 8.0))
-        .into()
+    container(
+        row![
+            svg(svg::Handle::from_memory(Icon::Check.bytes().to_vec()))
+                .width(12)
+                .height(12)
+                .style(move |_, _| svg::Style { color: Some(color) }),
+            text(label.into()).size(13).color(color).font(iced::Font {
+                weight: iced::font::Weight::ExtraBold,
+                ..NUNITO
+            }),
+        ]
+        .spacing(6)
+        .align_y(Alignment::Center),
+    )
+    .style(chip_style(color))
+    .padding(pad(4.0, 12.0, 4.0, 10.0))
+    .into()
 }
 
 // ── Buttons / Botones ────────────────────────────────────────

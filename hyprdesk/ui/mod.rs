@@ -1246,7 +1246,7 @@ impl App {
 
         let nav_col = column(nav_items).spacing(2).padding(pad(8.0, 8.0, 8.0, 8.0));
 
-        let mut footer_col: Vec<Element<_>> = vec![
+        let footer_col: Vec<Element<_>> = vec![
             text(concat!("v", env!("CARGO_PKG_VERSION")))
                 .size(10)
                 .color(SUBTEXT)
@@ -1259,56 +1259,100 @@ impl App {
                 .into(),
         ];
 
-        if let Some(ref version) = self.update_available {
-            let label = t("update_available").replace("{}", version);
-            let star_bytes = Icon::Star.bytes().to_vec();
-            let open_btn = button(
-                row![
-                    svg(svg::Handle::from_memory(star_bytes))
-                        .width(10)
-                        .height(10)
-                        .style(|_, _| svg::Style { color: Some(AMBER) }),
-                    text(label).size(11).color(AMBER).font(NUNITO),
-                ]
-                .spacing(4)
-                .align_y(Alignment::Center),
-            )
-            .style(|_, status| button::Style {
-                background: Some(iced::Background::Color(color_with_alpha(
-                    AMBER,
-                    if matches!(status, button::Status::Hovered) { 0.18 } else { 0.12 },
-                ))),
-                border: iced::Border {
-                    color: color_with_alpha(AMBER, 0.30),
-                    width: 1.0,
-                    radius: 6.0.into(),
-                },
-                ..Default::default()
-            })
-            .padding(pad(3.0, 7.0, 3.0, 7.0))
-            .on_press(Message::OpenUpdateLink);
-
-            let dismiss_btn = button(text("×").size(12).color(SUBTEXT).font(NUNITO))
-                .style(|_, _| button::Style {
-                    background: None,
-                    ..Default::default()
-                })
-                .padding(pad(2.0, 4.0, 2.0, 4.0))
-                .on_press(Message::DismissUpdate);
-
-            footer_col.push(
-                row![open_btn, dismiss_btn]
-                    .spacing(4)
-                    .align_y(Alignment::Center)
-                    .into(),
-            );
-        }
-
         let footer = container(column(footer_col).spacing(4))
             .padding(pad(0.0, 0.0, 16.0, 20.0))
             .width(Length::Fill);
 
-        container(column![brand, nav_col, space::vertical(), footer].spacing(0))
+        let mut sidebar_col: Vec<Element<_>> = vec![brand.into(), nav_col.into(), space::vertical().into()];
+
+        // Update notice, styled like the active nav item / Aviso de actualización, con el estilo del elemento de navegación activo
+        if let Some(ref version) = self.update_available {
+            let label = t("update_available").replace("{}", version);
+            let download_bytes = Icon::Download.bytes().to_vec();
+            let hover_style = |_: &Theme, status: button::Status| button::Style {
+                background: Some(iced::Background::Color(match status {
+                    button::Status::Hovered | button::Status::Pressed => color_with_alpha(TEXT, 0.06),
+                    _ => Color::TRANSPARENT,
+                })),
+                border: iced::Border { radius: 7.0.into(), ..Default::default() },
+                text_color: TEXT,
+                ..Default::default()
+            };
+            let open_btn = button(
+                row![
+                    container(
+                        svg(svg::Handle::from_memory(download_bytes))
+                            .width(14)
+                            .height(14)
+                            .style(|_, _| svg::Style { color: Some(AMBER) })
+                    )
+                    .width(26)
+                    .height(26)
+                    .align_x(Alignment::Center)
+                    .align_y(Alignment::Center)
+                    .style(|_| container::Style {
+                        background: Some(iced::Background::Color(color_with_alpha(AMBER, 0.15))),
+                        border: iced::Border { radius: 7.0.into(), ..Default::default() },
+                        ..Default::default()
+                    }),
+                    column![
+                        text(t("update_title")).size(13).color(TEXT).font(iced::Font {
+                            weight: iced::font::Weight::ExtraBold,
+                            ..NUNITO
+                        }),
+                        text(label).size(11).color(SUBTEXT).font(NUNITO),
+                    ]
+                    .spacing(1)
+                    .width(Length::Fill),
+                ]
+                .spacing(8)
+                .align_y(Alignment::Center),
+            )
+            .width(Length::Fill)
+            .padding(pad(5.0, 4.0, 5.0, 5.0))
+            .style(hover_style)
+            .on_press(Message::OpenUpdateLink);
+
+            let dismiss_btn = button(
+                container(text("×").size(14).color(SUBTEXT).font(NUNITO))
+                    .width(22)
+                    .height(22)
+                    .align_x(Alignment::Center)
+                    .align_y(Alignment::Center),
+            )
+            .padding(0)
+            .style(hover_style)
+            .on_press(Message::DismissUpdate);
+
+            sidebar_col.push(
+                container(
+                    container(row![open_btn, dismiss_btn].spacing(2).align_y(Alignment::Center))
+                        .padding(4)
+                        .width(Length::Fill)
+                        .style(|_| container::Style {
+                            background: Some(iced::Background::Color(CARD)),
+                            border: iced::Border {
+                                radius: 10.0.into(),
+                                color: Color::from_rgba8(0, 0, 0, 0.12),
+                                width: 1.0,
+                            },
+                            shadow: iced::Shadow {
+                                color: Color::from_rgba8(0, 0, 0, 0.055),
+                                offset: iced::Vector::new(0.0, 1.0),
+                                blur_radius: 4.0,
+                            },
+                            ..Default::default()
+                        }),
+                )
+                .padding(pad(0.0, 8.0, 12.0, 8.0))
+                .width(Length::Fill)
+                .into(),
+            );
+        }
+
+        sidebar_col.push(footer.into());
+
+        container(column(sidebar_col).spacing(0))
             .width(200)
             .height(Length::Fill)
             .style(|_| container::Style {
