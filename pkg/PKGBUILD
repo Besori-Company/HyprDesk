@@ -18,7 +18,7 @@ options=(!lto)
 
 source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
 # Regenerate after tagging the release / Regenerar tras etiquetar la release: makepkg -g
-sha256sums=('d8385ec83a7cede962c4e0e33bac70005fedc2eabca1f4a2fd80f3d36df18fa0')
+sha256sums=('5ae75af83f96a5a3a4a0fdd8980299fe01d5f763677610aeb13bf4d0381e4265')
 
 prepare() {
     cd "HyprDesk-$pkgver"
