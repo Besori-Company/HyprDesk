@@ -23,7 +23,7 @@
 Controla el brillo de tu pantalla en tiempo real. Detecta automáticamente el mejor método disponible (`brightnessctl` o ajuste gamma), y puede restaurar el último valor en cada arranque mediante `exec-once`.
 
 ### Modo noche
-Reduce la fatiga visual bajando la temperatura de color (1000–6500 K). Compatible con `hyprsunset`, `wlsunset`, `gammastep` y `redshift`, usa lo que tengas instalado.
+Reduce la fatiga visual bajando la temperatura de color (1000–6500 K). Funciona sin instalar nada más, con el daemon de noche propio de HyprDesk. Si tienes `hyprsunset` se usa ese, y `wlsunset` queda como respaldo.
 
 ### Monitores
 Gestión completa de monitores desde un único panel:
@@ -120,7 +120,7 @@ Requiere la cadena de herramientas Rust (`rustup`) y una GPU con soporte Vulkan.
 
 **Dependencias** (instaladas automáticamente por el instalador):
 - `brightnessctl`: Control de brillo por hardware
-- `hyprsunset` / `wlsunset` / `gammastep` / `redshift`: Modo noche — usa lo que esté instalado (Arch instala hyprsunset, el resto wlsunset si no hay ninguno)
+- `hyprsunset` / `wlsunset`: Modo noche. En cualquier distro se usa hyprsunset si está instalado, si no el daemon propio de HyprDesk, con wlsunset como respaldo. Si no hay ninguno el instalador añade uno por si acaso, hyprsunset donde tu distro lo tenga y wlsunset si no
 - `hyprctl`: Gestión de monitores y opacidad (incluido con Hyprland)
 - `polkit` (`pkexec`): Escalado de privilegios para el perfil (nombre de usuario y locale)
 - `glib2` (`gdbus`): AccountsService D-Bus para avatar y nombre de usuario
@@ -138,7 +138,7 @@ O si tienes el repositorio clonado: `./scripts/uninstall.sh`
 
 ## Compatibilidad
 
-Probado en Fedora Linux 44 con Hyprland 0.55.1, tanto con `hyprland.conf` como con `hyprland.lua`. Los ajustes se aplican en vivo mediante `hyprctl` y se guardan en el fichero propio de HyprDesk, `~/.config/hypr/hyprdesk.conf` (o `hyprdesk.lua`), cargado con una sola línea al final de tu config. Tus propios archivos no se reescriben (solo una vez, con copia de seguridad, para traer lo que escribieron versiones anteriores), y un cambio que Hyprland rechace se deshace automáticamente.
+Probado en Fedora Linux 44 y Ubuntu 26.04 con Hyprland 0.56.2, tanto con `hyprland.conf` como con `hyprland.lua`. Los ajustes se aplican en vivo mediante `hyprctl` y se guardan en el fichero propio de HyprDesk, `~/.config/hypr/hyprdesk.conf` (o `hyprdesk.lua`), cargado con una sola línea al final de tu config. Tus propios archivos no se reescriben (solo una vez, con copia de seguridad, para traer lo que escribieron versiones anteriores), y un cambio que Hyprland rechace se deshace automáticamente.
 
 ---
 

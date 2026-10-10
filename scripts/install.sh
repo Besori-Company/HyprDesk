@@ -151,11 +151,11 @@ if ! command -v brightnessctl &>/dev/null; then
     _install_dep "brightnessctl" "brightnessctl"
 fi
 
-# night mode: hyprsunset on Arch, wlsunset elsewhere / modo noche: hyprsunset en Arch, wlsunset en el resto
+# Night mode uses hyprsunset where the distro has it and wlsunset otherwise / El modo noche usa hyprsunset donde la distro lo tenga y wlsunset si no
 if ! command -v hyprsunset &>/dev/null && ! command -v wlsunset &>/dev/null \
    && ! command -v gammastep &>/dev/null && ! command -v redshift &>/dev/null; then
-    if [ "$PM" = "pacman" ]; then
-        _install_dep "hyprsunset" "hyprsunset"
+    if install_pkg "hyprsunset" &>/dev/null; then
+        msg "  ✓ hyprsunset installed" "  ✓ hyprsunset instalado"
     else
         _install_dep "wlsunset" "wlsunset"
     fi

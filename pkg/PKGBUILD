@@ -9,8 +9,8 @@ license=('LicenseRef-MIT-Commons-Clause')
 depends=('hyprland' 'vulkan-icd-loader')
 optdepends=(
     'brightnessctl: hardware backlight control'
-    'hyprsunset: night mode (Hyprland native)'
-    'wlsunset: night mode (alternative)'
+    'hyprsunset: night mode (used instead of the built-in daemon)'
+    'wlsunset: night mode (fallback)'
 )
 makedepends=('rust' 'cargo' 'pkg-config' 'libxkbcommon')
 
