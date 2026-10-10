@@ -10,6 +10,10 @@ const VERSION: &str = concat!("HyprDesk v", env!("CARGO_PKG_VERSION"));
 
 fn main() -> iced::Result {
     if let Some(arg) = std::env::args().nth(1) {
+        if arg == backend::night_daemon::FLAG {
+            let values: Vec<String> = std::env::args().skip(2).collect();
+            std::process::exit(backend::night_daemon::run(&values));
+        }
         // Help follows the language configured in the app / La ayuda sigue el idioma configurado en la app
         i18n::set_lang(&config::load_config().app_lang);
         match arg.as_str() {

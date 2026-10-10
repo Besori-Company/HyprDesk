@@ -7,6 +7,7 @@ pub mod hyprconf;
 mod live_tests;
 pub mod migrate;
 pub mod monitors;
+pub mod night_daemon;
 pub mod opacity;
 pub mod profile;
 pub mod update;

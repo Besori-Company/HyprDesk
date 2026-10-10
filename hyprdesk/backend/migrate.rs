@@ -83,6 +83,68 @@ fn is_old_hook(t: &str) -> bool {
         || (t.contains("hyprdesk-opacity.") && (t.starts_with("source") || t.starts_with("dofile(")))
 }
 
+fn lua_autostart_len(lines: &[&str], i: usize) -> usize {
+    let t = lines[i].trim();
+    if !t.starts_with("hl.on(\"hyprland.start\"") {
+        return 0;
+    }
+    if t.contains("hyprdesk-startup.sh") && t.ends_with("end)") {
+        return 1;
+    }
+    let body = lines.get(i + 1).map_or("", |l| l.trim());
+    let close = lines.get(i + 2).map_or("", |l| l.trim());
+    if t.ends_with("function()") && body.starts_with("hl.exec_cmd(") && body.contains("hyprdesk-startup.sh") && close == "end)" {
+        return 3;
+    }
+    0
+}
+
+fn without_stray_autostart(text: &str, lua: bool) -> Option<String> {
+    let lines: Vec<&str> = text.lines().collect();
+    let mut out: Vec<&str> = Vec::with_capacity(lines.len());
+    let mut i = 0;
+    while i < lines.len() {
+        let t = lines[i].trim();
+        let n = if lua {
+            lua_autostart_len(&lines, i)
+        } else {
+            usize::from(t.starts_with("exec-once") && t.contains("hyprdesk-startup.sh"))
+        };
+        if n == 0 {
+            out.push(lines[i]);
+            i += 1;
+            continue;
+        }
+        if out.last().is_some_and(|l| l.trim().is_empty()) {
+            out.pop();
+        }
+        i += n;
+    }
+    if out.len() == lines.len() {
+        return None;
+    }
+    let mut result = out.join("\n");
+    if text.ends_with('\n') {
+        result.push('\n');
+    }
+    Some(result)
+}
+
+// A hook left in the entry file runs the startup script a second time, and two gamma daemons at once lock Hyprland's gamma for the session / Un enganche olvidado en el fichero de entrada lanza el script de arranque una segunda vez, y dos daemons de gamma a la vez bloquean el gamma de Hyprland toda la sesión
+fn drop_stray_autostart(entry: &Path, backup_root: &Path) -> io::Result<()> {
+    let Ok(text) = fs::read_to_string(entry) else { return Ok(()) };
+    let lua = entry.extension().is_some_and(|e| e == "lua");
+    let Some(clean) = without_stray_autostart(&text, lua) else { return Ok(()) };
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let backup = backup_root.join(stamp.to_string());
+    fs::create_dir_all(&backup)?;
+    fs::copy(entry, backup.join(entry.file_name().unwrap_or_default()))?;
+    hyprconf::write_atomic(entry, &clean)
+}
+
 // Returns the rewritten text and how many HyprDesk entries it moved / Devuelve el texto reescrito y cuántas entradas de HyprDesk movió
 fn rewrite(text: &str, lua: bool, pats: &Patterns, state: &mut HyprState) -> (String, usize) {
     let tag = if lua { "-- [HyprDesk → hyprdesk.lua]" } else { "# [HyprDesk → hyprdesk.conf]" };
@@ -94,12 +156,13 @@ fn rewrite(text: &str, lua: bool, pats: &Patterns, state: &mut HyprState) -> (St
         let line = lines[i];
         let t = line.trim();
 
-        if is_old_hook(t) {
+        let hook_len = if is_old_hook(t) { 1 } else if lua { lua_autostart_len(&lines, i) } else { 0 };
+        if hook_len > 0 {
             if out.last().is_some_and(|l| l.trim().is_empty()) {
                 out.pop();
             }
             moved += 1;
-            i += 1;
+            i += hook_len;
             continue;
         }
 
@@ -266,8 +329,14 @@ pub fn on_startup() -> Option<Report> {
     let p = hyprconf::provider();
     let file_ok = fs::read_to_string(hypr.join(p.managed_name())).is_ok_and(|s| s == hyprconf::render(p, &state));
     let hook_ok = fs::read_to_string(hypr.join(p.entry_name())).map_or(true, |s| hyprconf::has_hook(p, &s));
-    if state != saved || !file_ok || !hook_ok {
-        let _ = hyprconf::commit_in(&hypr, &state_dir, p, &state, &[], true, &hyprconf::Hyprctl);
+    let in_place = if state != saved || !file_ok || !hook_ok {
+        hyprconf::commit_in(&hypr, &state_dir, p, &state, &[], true, &hyprconf::Hyprctl).is_ok()
+    } else {
+        true
+    };
+
+    if in_place && state.autostart.is_some() {
+        let _ = drop_stray_autostart(&hypr.join(p.entry_name()), &state_dir.join("backups"));
     }
     report
 }
@@ -345,6 +414,29 @@ windowrule = match:class ^(kitty)$, opacity 0.95
         assert_eq!(fs::read_to_string(report.backup.join("hyprland.conf")).unwrap(), HYPRLAND_CONF);
         assert_eq!(fs::read_to_string(report.backup.join("monitors.conf")).unwrap(), MONITORS_CONF);
         assert_eq!(fs::read_to_string(report.backup.join("hyprdesk-opacity.conf")).unwrap(), OPACITY_CONF);
+    }
+
+    #[test]
+    fn stray_autostart_hooks_are_dropped() {
+        let lua = "load_module(\"workspaces\")\nhl.on(\"hyprland.start\", function()\n  hl.exec_cmd(\"/home/u/.config/hypr/hyprdesk-startup.sh\")\nend)\n\n-- HyprDesk — keep this last / déjalo al final\npcall(require, \"hyprdesk\")\n";
+        let clean = without_stray_autostart(lua, true).unwrap();
+        assert_eq!(clean, "load_module(\"workspaces\")\n\n-- HyprDesk — keep this last / déjalo al final\npcall(require, \"hyprdesk\")\n");
+        assert_eq!(without_stray_autostart(&clean, true), None);
+
+        let one_line = "hl.on(\"hyprland.start\", function() hl.exec_cmd(\"/home/u/.config/hypr/hyprdesk-startup.sh\") end)\n";
+        assert_eq!(without_stray_autostart(one_line, true).as_deref(), Some("\n"));
+
+        let theirs = "hl.on(\"hyprland.start\", function()\n  hl.exec_cmd(\"waybar\")\nend)\n";
+        assert_eq!(without_stray_autostart(theirs, true), None);
+
+        let conf = "source = a.conf\nexec-once = /home/u/.config/hypr/hyprdesk-startup.sh\nexec-once = waybar\n";
+        assert_eq!(without_stray_autostart(conf, false).as_deref(), Some("source = a.conf\nexec-once = waybar\n"));
+        
+        let mut state = HyprState::default();
+        let labelled = "load_module(\"workspaces\")\n\n-- HyprDesk autostart\nhl.on(\"hyprland.start\", function()\n  hl.exec_cmd(\"/home/u/.config/hypr/hyprdesk-startup.sh\")\nend)\n";
+        let (text, moved) = rewrite(labelled, true, &Patterns::new(), &mut state);
+        assert_eq!(text, "load_module(\"workspaces\")\n");
+        assert_eq!(moved, 2);
     }
 
     #[test]

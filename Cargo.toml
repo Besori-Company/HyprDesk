@@ -19,3 +19,5 @@ serde_json = "1"
 regex      = "1"
 tokio      = { version = "1", features = ["time"] }
 image      = { version = "0.24", default-features = false, features = ["png", "jpeg", "webp"] }
+wayland-client        = "0.31"
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }

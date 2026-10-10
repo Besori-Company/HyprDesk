@@ -1,8 +1,11 @@
-// Display backend — controls brightness and color temperature via brightnessctl, hyprsunset or wlsunset.
-// Backend de pantalla — controla brillo y temperatura de color mediante brightnessctl, hyprsunset o wlsunset.
+// Display backend — controls brightness and color temperature via brightnessctl, hyprsunset, HyprDesk's own night daemon or wlsunset.
+// Backend de pantalla — controla brillo y temperatura de color mediante brightnessctl, hyprsunset, el daemon de noche propio de HyprDesk o wlsunset.
 
+use crate::backend::night_daemon;
 use crate::config::Config;
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, OnceLock};
 use std::time::Duration;
 
 fn run(cmd: &[&str]) -> (i32, String) {
@@ -69,7 +72,8 @@ pub fn brightness_method() -> (&'static str, bool) {
 
 pub fn gamma_tool() -> Option<String> {
     if is_hyprland() {
-        which("hyprsunset").or_else(|| which("wlsunset"))
+        // Our own daemon comes before wlsunset, which cannot change the light without restarting / Nuestro daemon va antes que wlsunset, que no puede cambiar la luz sin reiniciarse
+        which("hyprsunset").or_else(own_exe).or_else(|| which("wlsunset"))
     } else if !is_wayland() {
         which("gammastep").or_else(|| which("redshift"))
     } else {
@@ -77,8 +81,22 @@ pub fn gamma_tool() -> Option<String> {
     }
 }
 
+fn own_exe() -> Option<String> {
+    let exe = std::env::current_exe().ok()?.display().to_string();
+    let exe = exe.strip_suffix(" (deleted)").unwrap_or(&exe);
+    exe.ends_with("/hyprdesk").then(|| exe.to_string())
+}
+
 pub fn night_tool_available() -> bool {
     gamma_tool().is_some()
+}
+
+fn debug_file() -> std::io::Result<std::fs::File> {
+    std::fs::OpenOptions::new().create(true).append(true).open("/tmp/hyprdesk_debug.log")
+}
+
+fn debug_log(msg: &str) {
+    let _ = debug_file().map(|mut f| { use std::io::Write; let _ = writeln!(f, "{}", msg); });
 }
 
 // Waits for a daemon in the background so it leaves no zombie once it exits / Espera a un daemon en segundo plano para que no deje un zombi al terminar
@@ -90,10 +108,37 @@ fn reap(child: std::io::Result<std::process::Child>) {
     }
 }
 
+fn alive(pid: u32) -> bool {
+    std::fs::read_to_string(format!("/proc/{pid}/stat"))
+        .is_ok_and(|s| s.rsplit_once(") ").is_some_and(|(_, state)| !state.starts_with('Z')))
+}
+
+fn wait_gone(pids: &[u32]) {
+    if pids.is_empty() {
+        return;
+    }
+
+    for round in 0..60 {
+        if !pids.iter().any(|p| alive(*p)) {
+            break;
+        }
+        if round == 30 {
+            for pid in pids {
+                let _ = Command::new("kill").args(["-KILL", &pid.to_string()]).output();
+            }
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    std::thread::sleep(Duration::from_millis(100));
+}
+
 // Stops only the daemons of the session HyprDesk runs in; a nested or second Hyprland keeps its own / Para solo los daemons de la sesión donde corre HyprDesk; un Hyprland anidado o segundo conserva los suyos
 fn kill_gamma_daemons() {
     const NAMES: [&str; 4] = ["hyprsunset", "gammastep", "wlsunset", "redshift"];
+    night_daemon::stop();
     let own = wayland_env();
+    let mut killed = Vec::new();
     let Ok(procs) = std::fs::read_dir("/proc") else { return };
     for entry in procs.flatten() {
         let Some(pid) = entry.file_name().to_str().and_then(|s| s.parse::<u32>().ok()) else { continue };
@@ -104,8 +149,10 @@ fn kill_gamma_daemons() {
         let environ = std::fs::read(entry.path().join("environ")).unwrap_or_default();
         if same_session(&own, &parse_environ(&environ)) {
             let _ = Command::new("kill").arg(pid.to_string()).output();
+            killed.push(pid);
         }
     }
+    wait_gone(&killed);
 }
 
 fn parse_environ(raw: &[u8]) -> std::collections::HashMap<String, String> {
@@ -132,18 +179,25 @@ fn same_session(
     get(own, "DISPLAY") == get(other, "DISPLAY")
 }
 
-fn apply_gamma(brightness_pct: u32, temp_k: u32) {
-    let log = |msg: &str| {
-        let _ = std::fs::OpenOptions::new().create(true).append(true)
-            .open("/tmp/hyprdesk_debug.log")
-            .map(|mut f| { use std::io::Write; let _ = writeln!(f, "{}", msg); });
-    };
+static DAEMON_BROKEN: AtomicBool = AtomicBool::new(false);
 
-    let tool = match gamma_tool() {
-        Some(t) => t,
-        None => { log("gamma_tool() = None — no tool found"); return; }
-    };
-    let name = tool.split('/').last().unwrap_or(&tool).to_string();
+static GAMMA_FAILED: AtomicBool = AtomicBool::new(false);
+
+pub fn take_gamma_failure() -> bool {
+    GAMMA_FAILED.swap(false, Ordering::Relaxed)
+}
+
+fn apply_gamma(brightness_pct: u32, temp_k: u32) {
+    GAMMA_FAILED.store(false, Ordering::Relaxed);
+    match gamma_tool() {
+        Some(tool) => apply_gamma_with(&tool, brightness_pct, temp_k),
+        None => debug_log("gamma_tool() = None — no tool found"),
+    }
+}
+
+fn apply_gamma_with(tool: &str, brightness_pct: u32, temp_k: u32) {
+    let log = debug_log;
+    let name = tool.split('/').last().unwrap_or(tool).to_string();
     let b = (brightness_pct as f64 / 100.0).clamp(0.1, 1.0);
     log(&format!("apply_gamma: tool={tool} brightness={brightness_pct} temp={temp_k}"));
 
@@ -179,7 +233,6 @@ fn apply_gamma(brightness_pct: u32, temp_k: u32) {
             if !ipc_ok {
                 log(&format!("  fallback: kill + hyprsunset -t {temp_k} -g {brightness_pct}"));
                 kill_gamma_daemons();
-                std::thread::sleep(Duration::from_millis(200));
                 let result = Command::new(&tool)
                     .args(["-t", &temp_k.to_string(), "-g", &brightness_pct.to_string()])
                     .envs(&env)
@@ -191,21 +244,76 @@ fn apply_gamma(brightness_pct: u32, temp_k: u32) {
         }
         "wlsunset" => {
             kill_gamma_daemons();
-            std::thread::sleep(Duration::from_millis(200));
+            if temp_k >= 6500 {
+                return;
+            }
             let env = wayland_env();
             let low = temp_k.saturating_sub(1).max(1);
+            let stderr = debug_file().map_or_else(|_| Stdio::null(), Stdio::from);
             reap(Command::new(&tool)
                 .args(["-t", &low.to_string(), "-T", &temp_k.to_string()])
                 .envs(&env)
-                .stdout(Stdio::null()).stderr(Stdio::null())
+                .stdout(Stdio::null()).stderr(stderr)
                 .spawn());
+        }
+        "hyprdesk" => {
+            let gamma = if has_backlight() { 100 } else { brightness_pct };
+
+            if temp_k >= 6500 && gamma >= 100 {
+                kill_gamma_daemons();
+                return;
+            }
+
+            if !DAEMON_BROKEN.load(Ordering::Relaxed) {
+                if night_daemon::set(temp_k, gamma) == Some(true) {
+                    return;
+                }
+                log(&format!("  no daemon yet: {tool} {} {temp_k} {gamma}", night_daemon::FLAG));
+                kill_gamma_daemons();
+                let stderr = debug_file().map_or_else(|_| Stdio::null(), Stdio::from);
+                reap(Command::new(tool)
+                    .args([night_daemon::FLAG, &temp_k.to_string(), &gamma.to_string()])
+                    .envs(wayland_env())
+                    .stdin(Stdio::null()).stdout(Stdio::null()).stderr(stderr)
+                    .spawn());
+                let up = (0..30).any(|_| {
+                    std::thread::sleep(Duration::from_millis(50));
+                    night_daemon::set(temp_k, gamma) == Some(true)
+                });
+                if up {
+                    return;
+                }
+                log("  the daemon did not come up, falling back to wlsunset");
+                DAEMON_BROKEN.store(true, Ordering::Relaxed);
+            }
+
+            match which("wlsunset") {
+                Some(wlsunset) => apply_gamma_with(&wlsunset, brightness_pct, temp_k),
+                None => {
+                    log("  no wlsunset to fall back to");
+                    GAMMA_FAILED.store(true, Ordering::Relaxed);
+                }
+            }
         }
         _ => {}
     }
 }
 
 pub fn apply_gamma_bg(brightness_pct: u32, temp_k: u32) {
-    std::thread::spawn(move || apply_gamma(brightness_pct, temp_k));
+    static QUEUE: OnceLock<mpsc::Sender<(u32, u32)>> = OnceLock::new();
+    let tx = QUEUE.get_or_init(|| {
+        let (tx, rx) = mpsc::channel::<(u32, u32)>();
+        std::thread::spawn(move || {
+            while let Ok(mut request) = rx.recv() {
+                while let Ok(newer) = rx.try_recv() {
+                    request = newer;
+                }
+                apply_gamma(request.0, request.1);
+            }
+        });
+        tx
+    });
+    let _ = tx.send((brightness_pct, temp_k));
 }
 
 pub fn apply_night_mode(enabled: bool, temp: u32, brightness_pct: u32) {
@@ -247,13 +355,41 @@ fn restore_commands(config: &Config, backlight: bool, tool: &str) -> String {
             ("hyprsunset", false) => {
                 format!("    {tool} -t {t} & sleep 1 && hyprctl hyprsunset gamma {b} || true")
             }
-            ("wlsunset", _) => format!("    {tool} -t {} -T {t} &", t.saturating_sub(1).max(1)),
+            // A second run of the script only hands its values to the daemon already there / Una segunda ejecución del script solo le pasa sus valores al daemon que ya está
+            ("hyprdesk", _) => {
+                let gamma = if backlight { 100 } else { b };
+                let find = format!("    night=\"{tool}\"; [ -x \"$night\" ] || night=hyprdesk");
+                let daemon = format!("\"$night\" {} {t} {gamma}", night_daemon::FLAG);
+                if t >= 6500 && gamma >= 100 {
+                    String::new()
+                } else if t >= 6500 {
+                    format!("{find}\n    {daemon} &>/dev/null &")
+                } else {
+                    let low = t.saturating_sub(1).max(1);
+                    format!("{find}\n    ( {daemon}; case $? in 1|2|126|127) command -v wlsunset >/dev/null && exec wlsunset -t {low} -T {t};; esac ) &>/dev/null &")
+                }
+            }
+            ("wlsunset", _) if t >= 6500 => String::new(),
+            ("wlsunset", _) => wlsunset_restore(tool, t),
             _ => String::new(),
         });
     }
 
     lines.retain(|l| !l.trim().is_empty());
     lines.join("\n")
+}
+
+fn wlsunset_restore(tool: &str, t: u32) -> String {
+    let low = t.saturating_sub(1).max(1);
+    [
+        r#"    exec 9>"${XDG_RUNTIME_DIR:-/tmp}/hyprdesk-startup-${HYPRLAND_INSTANCE_SIGNATURE:-x}.lock""#.to_string(),
+        "    flock 9 2>/dev/null || true".to_string(),
+        r#"    own_wlsunset() { for p in $(pgrep -x -u "$(id -u)" wlsunset); do grep -qzx "HYPRLAND_INSTANCE_SIGNATURE=$HYPRLAND_INSTANCE_SIGNATURE" "/proc/$p/environ" 2>/dev/null && echo "$p"; done; }"#.to_string(),
+        r#"    for p in $(own_wlsunset); do kill "$p"; done"#.to_string(),
+        r#"    for _ in $(seq 40); do [ -z "$(own_wlsunset)" ] && break; sleep 0.05; done"#.to_string(),
+        format!("    {tool} -t {low} -T {t} 9>&- &"),
+    ]
+    .join("\n")
 }
 
 // Writes the startup script and lists it in HyprDesk's own config file / Escribe el script de arranque y lo apunta en el fichero de config propio de HyprDesk
@@ -337,10 +473,19 @@ mod tests {
         // wlsunset refuses to start unless -T > -t / wlsunset se niega a arrancar si -T no es mayor que -t
         let wlsunset = restore_commands(&cfg, true, "/usr/bin/wlsunset");
         assert!(wlsunset.contains("-T 3000") && wlsunset.contains("-t 2999"), "{wlsunset}");
+        // The previous daemon is stopped first, two at once lock Hyprland's gamma / Antes se para el daemon anterior, dos a la vez bloquean el gamma de Hyprland
+        assert!(wlsunset.find("kill").is_some_and(|k| k < wlsunset.find("-T 3000").unwrap()), "{wlsunset}");
 
         // Night mode off restores neutral light / Con el modo noche apagado se restaura luz neutra
         let day = Config { night_mode: false, ..cfg.clone() };
         assert!(restore_commands(&day, true, "/usr/bin/hyprsunset").contains("-t 6500"));
+        assert!(!restore_commands(&day, true, "/usr/bin/wlsunset").contains("wlsunset"));
+        let own = restore_commands(&cfg, true, "/usr/bin/hyprdesk");
+        assert!(own.contains("night=\"/usr/bin/hyprdesk\"; [ -x \"$night\" ] || night=hyprdesk"), "{own}");
+        assert!(own.contains("\"$night\" --night-daemon 3000 100; case $? in 1|2|126|127) "), "{own}");
+        assert!(restore_commands(&cfg, false, "/usr/bin/hyprdesk").contains("--night-daemon 3000 40; case $? in 1|2|126|127) command -v wlsunset >/dev/null && exec wlsunset -t 2999 -T 3000;; esac"));
+        assert!(!restore_commands(&day, true, "/usr/bin/hyprdesk").contains("night-daemon"));
+        assert!(restore_commands(&day, false, "/usr/bin/hyprdesk").contains("--night-daemon 6500 40 "));
 
         // No tool at all: brightness only, and nothing at all without backlight / Sin herramienta: solo brillo, y nada sin retroiluminación
         assert!(restore_commands(&cfg, true, "").contains("brightnessctl"));

@@ -89,6 +89,7 @@ fn strings(lang: &str) -> &'static HashMap<&'static str, &'static str> {
             m.insert("btn_remove", "Quitar");
             m.insert("toast_opacity_updated", "Opacidad aplicada");
             m.insert("toast_opacity_failed", "No se pudo escribir la configuración");
+            m.insert("toast_night_failed", "No se pudo aplicar la luz nocturna");
             m.insert("toast_config_migrated", "{n} ajustes de HyprDesk movidos a su propio fichero (copia en {path})");
             m.insert("row_overridden", "Tu configuración de Hyprland pisa este ajuste");
             m.insert("row_overridden_sub", "Algo lo vuelve a definir después del include de HyprDesk. Quítalo o deja el include al final.");
@@ -209,6 +210,7 @@ fn strings(lang: &str) -> &'static HashMap<&'static str, &'static str> {
             m.insert("btn_remove", "Remove");
             m.insert("toast_opacity_updated", "Opacity applied");
             m.insert("toast_opacity_failed", "Could not write opacity config");
+            m.insert("toast_night_failed", "Could not apply the night light");
             m.insert("toast_config_migrated", "Moved {n} HyprDesk settings to their own file (backup in {path})");
             m.insert("row_overridden", "Your Hyprland config overrides this");
             m.insert("row_overridden_sub", "Something sets it again after HyprDesk's include. Remove it or keep the include last.");

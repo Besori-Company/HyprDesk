@@ -163,6 +163,7 @@ pub enum Message {
     NightModeToggled(bool),
     NightTempChanged(f64),
     NightTempApply(u64, u32),
+    NightCheck,
 
     // Monitors / Monitores
     MonitorCanvasSelected(String),
@@ -213,6 +214,10 @@ pub enum Message {
     LanguageChanged(usize),
     LocaleChanged(usize),
     ApplyLocale,
+}
+
+fn night_check() -> Task<Message> {
+    Task::perform(async { tokio::time::sleep(Duration::from_secs(4)).await }, |_| Message::NightCheck)
 }
 
 // ── Init / Inicialización ────────────────────────────────────
@@ -401,7 +406,7 @@ impl App {
                 let brightness = self.brightness;
                 display::apply_night_mode(enabled, temp, brightness);
                 self.persist();
-                Task::none()
+                night_check()
             }
             Message::NightTempChanged(v) => {
                 self.night_temp = v as u32;
@@ -426,6 +431,12 @@ impl App {
                         self.night_temp_confirm = Some(ValueConfirm { old_value: old });
                     }
                     self.confirm_seconds = Some(15);
+                }
+                night_check()
+            }
+            Message::NightCheck => {
+                if display::take_gamma_failure() {
+                    self.toast = Some(t("toast_night_failed"));
                 }
                 Task::none()
             }
