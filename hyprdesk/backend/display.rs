@@ -351,10 +351,9 @@ fn restore_commands(config: &Config, backlight: bool, tool: &str) -> String {
             ("redshift" | "gammastep", false) => {
                 format!("    {tool} -P -O {t} -b {bv:.2}:{bv:.2} &>/dev/null || true")
             }
-            ("hyprsunset", true) => format!("    {tool} -t {t} &"),
-            ("hyprsunset", false) => {
-                format!("    {tool} -t {t} & sleep 1 && hyprctl hyprsunset gamma {b} || true")
-            }
+
+            ("hyprsunset", true) => hyprsunset_restore(tool, t, None),
+            ("hyprsunset", false) => hyprsunset_restore(tool, t, Some(b)),
             // A second run of the script only hands its values to the daemon already there / Una segunda ejecución del script solo le pasa sus valores al daemon que ya está
             ("hyprdesk", _) => {
                 let gamma = if backlight { 100 } else { b };
@@ -388,6 +387,27 @@ fn wlsunset_restore(tool: &str, t: u32) -> String {
         r#"    for p in $(own_wlsunset); do kill "$p"; done"#.to_string(),
         r#"    for _ in $(seq 40); do [ -z "$(own_wlsunset)" ] && break; sleep 0.05; done"#.to_string(),
         format!("    {tool} -t {low} -T {t} 9>&- &"),
+    ]
+    .join("\n")
+}
+
+fn hyprsunset_restore(tool: &str, t: u32, gamma: Option<u32>) -> String {
+    let (flag, tell) = match gamma {
+        Some(g) => (format!(" -g {g}"), format!(" && hyprctl hyprsunset gamma {g} &>/dev/null")),
+        None => (String::new(), String::new()),
+    };
+    [
+        r#"    exec 9>"${XDG_RUNTIME_DIR:-/tmp}/hyprdesk-startup-${HYPRLAND_INSTANCE_SIGNATURE:-x}.lock""#.to_string(),
+        "    flock 9 2>/dev/null || true".to_string(),
+        r#"    sock="$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.hyprsunset.sock""#.to_string(),
+        r#"    own_hyprsunset() { for p in $(pgrep -x -u "$(id -u)" hyprsunset); do grep -qzx "HYPRLAND_INSTANCE_SIGNATURE=$HYPRLAND_INSTANCE_SIGNATURE" "/proc/$p/environ" 2>/dev/null && echo "$p"; done; }"#.to_string(),
+        format!(r#"    if [ -z "$(own_hyprsunset)" ] || ! {{ hyprctl hyprsunset temperature {t} &>/dev/null{tell}; }}; then"#),
+        r#"        for p in $(own_hyprsunset); do kill "$p"; done"#.to_string(),
+        r#"        for _ in $(seq 40); do [ -z "$(own_hyprsunset)" ] && break; sleep 0.05; done"#.to_string(),
+        r#"        rm -f "$sock""#.to_string(),
+        format!("        {tool} -t {t}{flag} 9>&- &>/dev/null &"),
+        r#"        for _ in $(seq 60); do [ -e "$sock" ] && break; sleep 0.05; done"#.to_string(),
+        "    fi".to_string(),
     ]
     .join("\n")
 }
@@ -459,12 +479,16 @@ mod tests {
         let laptop = restore_commands(&cfg, true, "/usr/bin/hyprsunset");
         assert!(laptop.contains("brightnessctl set 40%"), "falta el brillo: {laptop}");
         assert!(laptop.contains("-t 3000"), "falta la temperatura: {laptop}");
-        assert!(!laptop.contains("hyprsunset gamma"), "no debe bajar el brillo dos veces: {laptop}");
+        assert!(!laptop.contains("hyprsunset gamma") && !laptop.contains(" -g "), "no debe bajar el brillo dos veces: {laptop}");
 
         // Desktop: no backlight, gamma does both / Sobremesa: sin retroiluminación, el gamma hace las dos
         let desktop = restore_commands(&cfg, false, "/usr/bin/hyprsunset");
         assert!(!desktop.contains("brightnessctl"), "no hay retroiluminación que usar: {desktop}");
-        assert!(desktop.contains("-t 3000") && desktop.contains("gamma 40"), "{desktop}");
+        assert!(desktop.contains("/usr/bin/hyprsunset -t 3000 -g 40 ") && desktop.contains("gamma 40"), "{desktop}");
+        // It asks the running daemon first and only then starts a new one / Primero pregunta al daemon que ya corre y solo después arranca uno nuevo
+        assert!(desktop.find("flock 9").is_some_and(|l| l < desktop.find("-t 3000 -g 40").unwrap()), "{desktop}");
+        assert!(desktop.find("hyprctl hyprsunset temperature 3000").is_some_and(|i| i < desktop.find("-t 3000 -g 40").unwrap()), "{desktop}");
+        assert!(!desktop.contains("sleep 1 "), "{desktop}");
 
         // Same split for the other tools / El mismo reparto con las otras herramientas
         let gammastep = restore_commands(&cfg, true, "/usr/bin/gammastep");
@@ -490,6 +514,98 @@ mod tests {
         // No tool at all: brightness only, and nothing at all without backlight / Sin herramienta: solo brillo, y nada sin retroiluminación
         assert!(restore_commands(&cfg, true, "").contains("brightnessctl"));
         assert_eq!(restore_commands(&cfg, false, ""), "");
+    }
+
+    fn fake_session(name: &str) -> (std::path::PathBuf, String) {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("hyprdesk-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let sig = format!("hyprdesk-test-{name}-{}", std::process::id());
+        std::fs::create_dir_all(dir.join("bin")).unwrap();
+        std::fs::create_dir_all(dir.join("hypr").join(&sig)).unwrap();
+        let daemon = "#!/bin/bash\nsock=\"$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.hyprsunset.sock\"\necho \"start $*\" >> \"$XDG_RUNTIME_DIR/log\"\ntrap 'rm -f \"$sock\"; exit 0' TERM\nsleep 0.2\n: > \"$sock\"\nfor _ in $(seq 100); do sleep 0.1; done\nrm -f \"$sock\"\n";
+        let ctl = "#!/bin/bash\n[ -e \"$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.hyprsunset.sock\" ] || exit 3\necho \"ctl $*\" >> \"$XDG_RUNTIME_DIR/log\"\n";
+        for (file, body) in [("hyprsunset", daemon), ("hyprctl", ctl)] {
+            let path = dir.join("bin").join(file);
+            std::fs::write(&path, body).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        (dir, sig)
+    }
+
+    fn run_startup(dir: &std::path::Path, sig: &str, script: &std::path::Path) -> std::process::Child {
+        let path = format!("{}:{}", dir.join("bin").display(), std::env::var("PATH").unwrap_or_default());
+        Command::new("bash")
+            .arg(script)
+            .env("PATH", path)
+            .env("XDG_RUNTIME_DIR", dir)
+            .env("HYPRLAND_INSTANCE_SIGNATURE", sig)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap()
+    }
+
+    fn stop_fakes(sig: &str) {
+        let Ok(procs) = std::fs::read_dir("/proc") else { return };
+        for entry in procs.flatten() {
+            let environ = std::fs::read(entry.path().join("environ")).unwrap_or_default();
+            if parse_environ(&environ).get("HYPRLAND_INSTANCE_SIGNATURE").map(String::as_str) == Some(sig) {
+                let _ = Command::new("kill").arg(entry.file_name()).output();
+            }
+        }
+    }
+
+    #[test]
+    fn two_startup_runs_leave_one_hyprsunset_with_the_saved_brightness() {
+        let (dir, sig) = fake_session("twice");
+        let cfg = Config { brightness: 40, night_mode: true, night_temp: 3000, ..Config::default() };
+        let tool = dir.join("bin/hyprsunset");
+        let script = dir.join("startup.sh");
+        std::fs::write(&script, format!("#!/bin/bash\n{}\n", restore_commands(&cfg, false, &tool.display().to_string()))).unwrap();
+
+        let (mut a, mut b) = (run_startup(&dir, &sig, &script), run_startup(&dir, &sig, &script));
+        let ok = a.wait().unwrap().success() & b.wait().unwrap().success();
+        let log = std::fs::read_to_string(dir.join("log")).unwrap_or_default();
+        let socket = dir.join("hypr").join(&sig).join(".hyprsunset.sock").exists();
+        let later = Config { brightness: 55, ..cfg.clone() };
+        std::fs::write(&script, format!("#!/bin/bash\n{}\n", restore_commands(&later, false, &tool.display().to_string()))).unwrap();
+        let third = run_startup(&dir, &sig, &script).wait().unwrap().success();
+        let after = std::fs::read_to_string(dir.join("log")).unwrap_or_default();
+
+        stop_fakes(&sig);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert!(ok && third, "{after}");
+        assert_eq!(log.lines().filter(|l| l.starts_with("start ")).collect::<Vec<_>>(), ["start -t 3000 -g 40"], "{log}");
+        assert!(socket, "el daemon que queda conserva su socket: {log}");
+        assert!(log.contains("ctl hyprsunset gamma 40"), "la segunda ejecución solo pasa los valores: {log}");
+        assert_eq!(after.lines().filter(|l| l.starts_with("start ")).count(), 1, "{after}");
+        assert!(after.ends_with("ctl hyprsunset temperature 3000\nctl hyprsunset gamma 55\n"), "{after}");
+    }
+
+    // A daemon without its socket is replaced / Un daemon sin su socket se sustituye
+    #[test]
+    fn a_hyprsunset_that_lost_its_socket_is_replaced() {
+        let (dir, sig) = fake_session("deaf");
+        let cfg = Config { brightness: 40, night_mode: true, night_temp: 3000, ..Config::default() };
+        let tool = dir.join("bin/hyprsunset");
+        let script = dir.join("startup.sh");
+        std::fs::write(&script, format!("#!/bin/bash\n{}\n", restore_commands(&cfg, false, &tool.display().to_string()))).unwrap();
+        let sock = dir.join("hypr").join(&sig).join(".hyprsunset.sock");
+
+        let first = run_startup(&dir, &sig, &script).wait().unwrap().success();
+        std::fs::remove_file(&sock).unwrap();
+        let second = run_startup(&dir, &sig, &script).wait().unwrap().success();
+        let log = std::fs::read_to_string(dir.join("log")).unwrap_or_default();
+        let socket = sock.exists();
+
+        stop_fakes(&sig);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert!(first && second, "{log}");
+        assert_eq!(log.lines().filter(|l| l.starts_with("start -t 3000 -g 40")).count(), 2, "{log}");
+        assert!(socket, "{log}");
     }
 
 }

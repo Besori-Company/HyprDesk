@@ -335,6 +335,11 @@ pub fn on_startup() -> Option<Report> {
         true
     };
 
+    // Also fixes installs that already had the old file / También arregla las instalaciones que ya tenían el fichero antiguo
+    if in_place {
+        let _ = hyprconf::quiet_twin(p, &hypr, &state);
+    }
+
     if in_place && state.autostart.is_some() {
         let _ = drop_stray_autostart(&hypr.join(p.entry_name()), &state_dir.join("backups"));
     }
